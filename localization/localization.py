@@ -437,6 +437,123 @@ class Localization:
                 'ja-JP' : '保存',
                 'de-DE' : 'Speichern'},
 
+    'QCameraSource.tab_camera':{
+                'en-US' : 'Camera',
+                'ru-RU' : 'Камера',
+                'zh-CN' : '摄像头',
+                'es-ES' : 'Cámara',
+                'it-IT' : 'Telecamera',
+                'ja-JP' : 'カメラ',
+                'de-DE' : 'Kamera'},
+
+    'QCameraSource.tab_network':{
+                'en-US' : 'Network stream',
+                'ru-RU' : 'Сетевой поток',
+                'zh-CN' : '网络流',
+                'es-ES' : 'Transmisión de red',
+                'it-IT' : 'Streaming di rete',
+                'ja-JP' : 'ネットワークストリーム',
+                'de-DE' : 'Netzwerk-Stream'},
+
+    'QCameraSource.stream_protocol':{
+                'en-US' : 'Protocol',
+                'ru-RU' : 'Протокол',
+                'zh-CN' : '协议',
+                'es-ES' : 'Protocolo',
+                'it-IT' : 'Protocollo',
+                'ja-JP' : 'プロトコル',
+                'de-DE' : 'Protokoll'},
+
+    'QCameraSource.help.stream_protocol':{
+                'en-US' : 'Incoming stream protocol. Listen URL and port are taken from environment variables (see NETWORK_STREAMING.md).',
+                'ru-RU' : 'Протокол входящего потока. URL и порт из переменных окружения (см. NETWORK_STREAMING.md).',
+                'zh-CN' : '入站流协议。监听地址与端口来自环境变量（见 NETWORK_STREAMING.md）。',
+                'es-ES' : 'Protocolo de entrada. La URL y el puerto provienen de variables de entorno (véase NETWORK_STREAMING.md).',
+                'it-IT' : 'Protocollo del flusso in ingresso. URL e porta da variabili d’ambiente (vedi NETWORK_STREAMING.md).',
+                'ja-JP' : '受信ストリームのプロトコル。待受URLとポートは環境変数から読みます（NETWORK_STREAMING.md参照）。',
+                'de-DE' : 'Eingehendes Stream-Protokoll. Listen-URL und Port kommen aus Umgebungsvariablen (siehe NETWORK_STREAMING.md).'},
+
+    'QCameraSource.listen_url':{
+                'en-US' : 'Listen URL',
+                'ru-RU' : 'URL приёма',
+                'zh-CN' : '监听 URL',
+                'es-ES' : 'URL de escucha',
+                'it-IT' : 'URL in ascolto',
+                'ja-JP' : '待受URL',
+                'de-DE' : 'Listen-URL'},
+
+    'QCameraSource.help.listen_url':{
+                'en-US' : 'URL FFmpeg listens on (bind host and port from DFL_STREAM_* environment variables).',
+                'ru-RU' : 'URL, на котором FFmpeg принимает поток (хост и порт из DFL_STREAM_*).',
+                'zh-CN' : 'FFmpeg 监听的 URL（由 DFL_STREAM_* 环境变量决定绑定地址与端口）。',
+                'es-ES' : 'URL en la que FFmpeg escucha (host y puerto desde variables DFL_STREAM_*).',
+                'it-IT' : 'URL su cui FFmpeg è in ascolto (host e porta dalle variabili DFL_STREAM_*).',
+                'ja-JP' : 'FFmpeg が待ち受けるURL（DFL_STREAM_* 環境変数でホストとポートを指定）。',
+                'de-DE' : 'URL, auf der FFmpeg lauscht (Bind-Host und Port über DFL_STREAM_*-Umgebungsvariablen).'},
+
+    'QCameraSource.client_url':{
+                'en-US' : 'Publisher URL (OBS / phone)',
+                'ru-RU' : 'URL для публикации (OBS / телефон)',
+                'zh-CN' : '推流端 URL（OBS / 手机）',
+                'es-ES' : 'URL del publicador (OBS / teléfono)',
+                'it-IT' : 'URL per pubblicare (OBS / telefono)',
+                'ja-JP' : '配信側URL（OBS / スマホ）',
+                'de-DE' : 'Publisher-URL (OBS / Telefon)'},
+
+    'QCameraSource.help.client_url':{
+                'en-US' : 'Shown when DFL_STREAM_CLIENT_HOST is set (e.g. your LAN IP for OBS or Larix).',
+                'ru-RU' : 'Показывается если задан DFL_STREAM_CLIENT_HOST (например LAN IP для OBS или Larix).',
+                'zh-CN' : '在设置 DFL_STREAM_CLIENT_HOST（例如本机局域网 IP）时显示，供 OBS 或 Larix 填写。',
+                'es-ES' : 'Se muestra si DFL_STREAM_CLIENT_HOST está definida (p. ej. IP LAN para OBS o Larix).',
+                'it-IT' : 'Visibile se DFL_STREAM_CLIENT_HOST è impostato (es. IP LAN per OBS o Larix).',
+                'ja-JP' : 'DFL_STREAM_CLIENT_HOST を設定すると表示（OBS や Larix 用のLAN IP など）。',
+                'de-DE' : 'Wird angezeigt, wenn DFL_STREAM_CLIENT_HOST gesetzt ist (z. B. LAN-IP für OBS oder Larix).'},
+
+    'QCameraSource.waiting_for_stream':{
+                'en-US' : 'Waiting for incoming stream…',
+                'ru-RU' : 'Ожидание входящего потока…',
+                'zh-CN' : '等待推流接入…',
+                'es-ES' : 'Esperando la transmisión entrante…',
+                'it-IT' : 'In attesa del flusso in ingresso…',
+                'ja-JP' : '受信ストリームを待機中…',
+                'de-DE' : 'Warte auf eingehenden Stream…'},
+
+    'QCameraSource.protocol_udp':{
+                'en-US' : 'UDP (MPEG-TS)',
+                'ru-RU' : 'UDP (MPEG-TS)',
+                'zh-CN' : 'UDP (MPEG-TS)',
+                'es-ES' : 'UDP (MPEG-TS)',
+                'it-IT' : 'UDP (MPEG-TS)',
+                'ja-JP' : 'UDP (MPEG-TS)',
+                'de-DE' : 'UDP (MPEG-TS)'},
+
+    'QCameraSource.protocol_srt':{
+                'en-US' : 'SRT (listener)',
+                'ru-RU' : 'SRT (приёмник)',
+                'zh-CN' : 'SRT（监听）',
+                'es-ES' : 'SRT (oyente)',
+                'it-IT' : 'SRT (listener)',
+                'ja-JP' : 'SRT（リスナー）',
+                'de-DE' : 'SRT (Listener)'},
+
+    'QCameraSource.protocol_rtmp':{
+                'en-US' : 'RTMP (listener)',
+                'ru-RU' : 'RTMP (приёмник)',
+                'zh-CN' : 'RTMP（监听）',
+                'es-ES' : 'RTMP (oyente)',
+                'it-IT' : 'RTMP (listener)',
+                'ja-JP' : 'RTMP（リスナー）',
+                'de-DE' : 'RTMP (Listener)'},
+
+    'QCameraSource.protocol_rtsp':{
+                'en-US' : 'RTSP (listener)',
+                'ru-RU' : 'RTSP (приёмник)',
+                'zh-CN' : 'RTSP（监听）',
+                'es-ES' : 'RTSP (oyente)',
+                'it-IT' : 'RTSP (listener)',
+                'ja-JP' : 'RTSP（リスナー）',
+                'de-DE' : 'RTSP (Listener)'},
+
     'QFaceDetector.module_title':{
                 'en-US' : 'Face detector',
                 'ru-RU' : 'Детектор лиц',

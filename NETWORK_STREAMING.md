@@ -4,6 +4,33 @@ This guide explains how to connect external video sources (like your smartphone 
 
 **Assumed Local IP Address for PC:** `192.168.3.229` *(Replace this with your actual local IP)*
 
+## Environment variables (DeepFaceLive)
+
+When launching DeepFaceLive, you can set these variables so the **Network stream** tab builds listen and publisher URLs automatically (no manual URL pasting). Defaults match the quick reference table below.
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `DFL_STREAM_BIND_HOST` | `0.0.0.0` | Address FFmpeg binds to for incoming streams. |
+| `DFL_STREAM_CLIENT_HOST` | *(empty)* | If set (e.g. `192.168.3.229`), the UI shows the **Publisher URL** for OBS / Larix using this host. |
+| `DFL_STREAM_PORT_UDP` | `1238` | UDP listen port. |
+| `DFL_STREAM_PORT_SRT` | `8888` | SRT listen port. |
+| `DFL_STREAM_PORT_RTMP` | `1935` | RTMP listen port (path `/live/stream`). |
+| `DFL_STREAM_PORT_RTSP` | `8554` | RTSP listen port (path `/live`). |
+| `DFL_STREAM_PROTOCOL` | `udp` | Initial protocol in the UI: `udp`, `srt`, `rtmp`, or `rtsp` (case-insensitive). |
+
+**Example (macOS / Linux):**
+
+```bash
+export DFL_STREAM_BIND_HOST=0.0.0.0
+export DFL_STREAM_CLIENT_HOST=192.168.3.229
+export DFL_STREAM_PORT_UDP=1238
+export DFL_STREAM_PORT_SRT=8888
+export DFL_STREAM_PORT_RTMP=1935
+export DFL_STREAM_PORT_RTSP=8554
+export DFL_STREAM_PROTOCOL=srt
+python main.py run DeepFaceLive
+```
+
 ## Quick Reference Table
 
 | Protocol | Latency | Quality/Stability | DeepFaceLive URL (PC) | Streaming Source URL (OBS/Phone) |

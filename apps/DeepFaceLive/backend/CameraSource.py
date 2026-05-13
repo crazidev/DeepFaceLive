@@ -19,7 +19,19 @@ from .BackendBase import (BackendConnection, BackendConnectionData, BackendDB,
                           BackendWorkerState)
 
 
+class _SourceType(IntEnum):
+    CAMERA_DEVICE = 0
+    NETWORK_STREAM = 1
+
+_SourceType_names = { _SourceType.CAMERA_DEVICE : 'Camera device',
+                      _SourceType.NETWORK_STREAM : 'Network stream',
+                    }
+
+
 class CameraSource(BackendHost):
+    SOURCE_TYPE_CAMERA = _SourceType.CAMERA_DEVICE
+    SOURCE_TYPE_NETWORK = _SourceType.NETWORK_STREAM
+
     def __init__(self, weak_heap :  BackendWeakHeap, bc_out : BackendConnection, backend_db : BackendDB = None):
         super().__init__(backend_db=backend_db,
                          sheet_cls=Sheet,
@@ -29,13 +41,77 @@ class CameraSource(BackendHost):
 
     def get_control_sheet(self) -> 'Sheet.Host': return super().get_control_sheet()
 
-class _SourceType(IntEnum):
-    CAMERA_DEVICE = 0
-    NETWORK_STREAM = 1
 
-_SourceType_names = { _SourceType.CAMERA_DEVICE : 'Camera device',
-                      _SourceType.NETWORK_STREAM : 'Network stream',
-                    }
+class _StreamProtocol(IntEnum):
+    UDP = 0
+    SRT = 1
+    RTMP = 2
+    RTSP = 3
+
+
+_StreamProtocol_names = {
+    _StreamProtocol.UDP: '@QCameraSource.protocol_udp',
+    _StreamProtocol.SRT: '@QCameraSource.protocol_srt',
+    _StreamProtocol.RTMP: '@QCameraSource.protocol_rtmp',
+    _StreamProtocol.RTSP: '@QCameraSource.protocol_rtsp',
+}
+
+
+class StreamEnv:
+    __slots__ = ('bind_host', 'client_host', 'ports', 'default_protocol')
+
+    def __init__(self, bind_host : str, client_host : Union[str, None], ports : dict, default_protocol : _StreamProtocol):
+        self.bind_host = bind_host
+        self.client_host = client_host
+        self.ports = ports
+        self.default_protocol = default_protocol
+
+
+def _parse_int_env(name : str, default : int) -> int:
+    v = os.environ.get(name)
+    if v is None or len(str(v).strip()) == 0:
+        return default
+    try:
+        return int(v.strip(), 10)
+    except ValueError:
+        return default
+
+
+def read_stream_env() -> StreamEnv:
+    bind_host = (os.environ.get('DFL_STREAM_BIND_HOST') or '0.0.0.0').strip() or '0.0.0.0'
+    ch = (os.environ.get('DFL_STREAM_CLIENT_HOST') or '').strip()
+    client_host = ch if ch else None
+    ports = {
+        _StreamProtocol.UDP: _parse_int_env('DFL_STREAM_PORT_UDP', 1238),
+        _StreamProtocol.SRT: _parse_int_env('DFL_STREAM_PORT_SRT', 8888),
+        _StreamProtocol.RTMP: _parse_int_env('DFL_STREAM_PORT_RTMP', 1935),
+        _StreamProtocol.RTSP: _parse_int_env('DFL_STREAM_PORT_RTSP', 8554),
+    }
+    key = (os.environ.get('DFL_STREAM_PROTOCOL') or 'udp').strip().lower()
+    pmap = {'udp': _StreamProtocol.UDP, 'srt': _StreamProtocol.SRT, 'rtmp': _StreamProtocol.RTMP, 'rtsp': _StreamProtocol.RTSP}
+    default_protocol = pmap.get(key, _StreamProtocol.UDP)
+    return StreamEnv(bind_host, client_host, ports, default_protocol)
+
+
+def compose_network_stream_urls(protocol : _StreamProtocol, env : StreamEnv) -> Tuple[str, str]:
+    port = env.ports[protocol]
+    bh = env.bind_host or '0.0.0.0'
+    ch = env.client_host
+    if protocol == _StreamProtocol.UDP:
+        listen = f'udp://{bh}:{port}'
+        client = (f'udp://{ch}:{port}?pkt_size=1316' if ch else '')
+    elif protocol == _StreamProtocol.SRT:
+        listen = f'srt://{bh}:{port}?mode=listener'
+        client = (f'srt://{ch}:{port}' if ch else '')
+    elif protocol == _StreamProtocol.RTMP:
+        listen = f'rtmp://{bh}:{port}/live/stream?listen=1'
+        client = (f'rtmp://{ch}:{port}/live/stream' if ch else '')
+    elif protocol == _StreamProtocol.RTSP:
+        listen = f'rtsp://{bh}:{port}/live?listen=1'
+        client = (f'rtsp://{ch}:{port}/live' if ch else '')
+    else:
+        listen, client = '', ''
+    return listen, client
 
 class _ResolutionType(IntEnum):
     RES_320x240 = 0
@@ -102,12 +178,16 @@ class CameraSourceWorker(BackendWorker):
         self.last_ffmpeg_start_time = 0
         self.last_frame = None
         self.last_timestamp = 0
+        self._stream_env = read_stream_env()
+        self._stream_feed_connected_event = threading.Event()
+        self._last_stream_wait_sent = None
         lib_os.set_timer_resolution(4)
 
         state, cs = self.get_state(), self.get_control_sheet()
 
         cs.source_type.call_on_selected(self.on_cs_source_type_selected)
         cs.stream_url.call_on_text(self.on_cs_stream_url)
+        cs.stream_protocol.call_on_selected(self.on_cs_stream_protocol_selected)
         cs.driver.call_on_selected(self.on_cs_driver_selected)
         cs.device_idx.call_on_selected(self.on_cs_device_idx_selected)
         cs.resolution.call_on_selected(self.on_cs_resolution_selected)
@@ -124,6 +204,22 @@ class CameraSourceWorker(BackendWorker):
 
         cs.stream_url.enable()
         cs.stream_url.set_text(state.stream_url if state.stream_url is not None else '')
+
+        cs.stream_protocol.enable()
+        cs.stream_protocol.set_choices(_StreamProtocol, _StreamProtocol_names, none_choice_name=None)
+        if state.stream_protocol is None:
+            state.stream_protocol = self._stream_env.default_protocol
+        cs.stream_protocol.select(state.stream_protocol)
+
+        cs.stream_waiting.enable()
+        cs.stream_waiting.set_flag(False)
+
+        if state.source_type == _SourceType.NETWORK_STREAM:
+            self._apply_network_stream_from_state()
+        else:
+            cs.stream_protocol.disable()
+            cs.stream_client_hint.disable()
+            cs.stream_waiting.disable()
 
         if state.source_type == _SourceType.CAMERA_DEVICE:
             cs.driver.enable()
@@ -189,9 +285,11 @@ class CameraSourceWorker(BackendWorker):
                     print("\033[92mStream opened successfully\033[0m")
                     self.vcap = vcap
                 else:
-                    print("\033[93mFailed to open stream\033[0m")
+                    print("\033[93mFailed to open stream (using FFmpeg for listener / push URLs)\033[0m")
 
-            if vcap.isOpened():
+            if vcap.isOpened() or (state.source_type == _SourceType.NETWORK_STREAM and state.stream_url):
+                if state.source_type == _SourceType.NETWORK_STREAM and not vcap.isOpened():
+                    vcap.release()
                 cs.fps.enable()
                 cs.fps.set_config(lib_csw.Number.Config(min=0, max=240, step=1.0, decimals=2, zero_is_auto=True, allow_instant_update=False))
                 cs.fps.set_number(state.fps if state.fps is not None else 0)
@@ -212,10 +310,76 @@ class CameraSourceWorker(BackendWorker):
                 if state.source_type == _SourceType.CAMERA_DEVICE:
                     cs.device_idx.unselect()
 
+    def _apply_network_stream_from_state(self):
+        state, cs = self.get_state(), self.get_control_sheet()
+        if state.stream_protocol is None:
+            state.stream_protocol = self._stream_env.default_protocol
+        listen, client = compose_network_stream_urls(state.stream_protocol, self._stream_env)
+        state.stream_url = listen
+        cs.stream_url.set_text(listen)
+        if client:
+            cs.stream_client_hint.set_text(client)
+            cs.stream_client_hint.enable()
+        else:
+            cs.stream_client_hint.set_text('')
+            cs.stream_client_hint.disable()
+        self.save_state()
+
+    def _is_network_listener_url(self, url : str) -> bool:
+        if not url:
+            return False
+        u = url.lower()
+        return 'listen=1' in u or 'mode=listener' in u or u.startswith('udp://')
+
+    def _update_stream_waiting_ui(self):
+        state, cs = self.get_state(), self.get_control_sheet()
+        if not cs.stream_waiting.is_enabled():
+            return
+        url = state.stream_url or ''
+        waiting = (
+            state.source_type == _SourceType.NETWORK_STREAM
+            and self._is_network_listener_url(url)
+            and self.is_started()
+            and (
+                self.ffmpeg_starting
+                or (
+                    self.ffmpeg_proc is not None
+                    and self.ffmpeg_proc.poll() is None
+                    and not self._stream_feed_connected_event.is_set()
+                )
+            )
+        )
+        if waiting != self._last_stream_wait_sent:
+            self._last_stream_wait_sent = waiting
+            cs.stream_waiting.set_flag(waiting)
+
+    def on_cs_stream_protocol_selected(self, idx, protocol : _StreamProtocol):
+        state, cs = self.get_state(), self.get_control_sheet()
+        if state.source_type != _SourceType.NETWORK_STREAM:
+            return
+        if state.stream_protocol == protocol:
+            return
+        state.stream_protocol = protocol
+        self._apply_network_stream_from_state()
+        if self.is_started():
+            self.stop_ffmpeg()
+            self.set_vcap(None)
+            self.restart()
+
     def on_cs_source_type_selected(self, idx, source_type):
         cs, state = self.get_control_sheet(), self.get_state()
         if state.source_type != source_type:
             state.source_type = source_type
+            if source_type == _SourceType.NETWORK_STREAM:
+                cs.stream_protocol.enable()
+                cs.stream_waiting.enable()
+                self._apply_network_stream_from_state()
+            else:
+                cs.stream_protocol.disable()
+                cs.stream_client_hint.disable()
+                cs.stream_waiting.disable()
+                cs.stream_waiting.set_flag(False)
+                self._last_stream_wait_sent = None
             self.save_state()
             if self.is_started():
                 self.stop_ffmpeg()
@@ -375,6 +539,7 @@ class CameraSourceWorker(BackendWorker):
                     break
                 if not stream_connected:
                     stream_connected = True
+                    self._stream_feed_connected_event.set()
                     print(f"\033[92m[✓] Stream connected and receiving frames: {url}\033[0m")
                 self.last_frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((h, w, 3))
         except Exception as e:
@@ -388,6 +553,7 @@ class CameraSourceWorker(BackendWorker):
 
     def stop_ffmpeg(self):
         self.ffmpeg_starting = False
+        self._stream_feed_connected_event.clear()
         if self.ffmpeg_proc:
             self.ffmpeg_proc.terminate()
             try:
@@ -399,6 +565,10 @@ class CameraSourceWorker(BackendWorker):
             # We don't join because it might block, let it die as daemon
             self.ffmpeg_thread = None
         self.last_frame = None
+        cs = self.get_control_sheet()
+        if cs.stream_waiting.is_enabled():
+            cs.stream_waiting.set_flag(False)
+        self._last_stream_wait_sent = None
 
     def on_stop(self):
         self.stop_ffmpeg()
@@ -417,11 +587,13 @@ class CameraSourceWorker(BackendWorker):
                 if ret:
                     self._process_frame(img)
         else:
+            self._update_stream_waiting_ui()
             if self.ffmpeg_proc is None and not self.ffmpeg_starting:
                 if state.stream_url:
                     now = time.time()
                     if now - self.last_ffmpeg_start_time > 5.0: # Retry delay
                         self.last_ffmpeg_start_time = now
+                        self._stream_feed_connected_event.clear()
                         self.ffmpeg_thread = threading.Thread(target=self._ffmpeg_reader, args=(state.stream_url,), daemon=True)
                         self.ffmpeg_thread.start()
             
@@ -505,6 +677,7 @@ class WorkerState(BackendWorkerState):
     def __init__(self):
         self.source_type : _SourceType = None
         self.stream_url : str = None
+        self.stream_protocol : _StreamProtocol = None
         self.device_idx : int = None
         self.driver : _DriverType = None
         self.resolution : _ResolutionType = None
@@ -519,6 +692,9 @@ class Sheet:
             super().__init__()
             self.source_type = lib_csw.DynamicSingleSwitch.Client()
             self.stream_url = lib_csw.Text.Client()
+            self.stream_protocol = lib_csw.DynamicSingleSwitch.Client()
+            self.stream_client_hint = lib_csw.Text.Client()
+            self.stream_waiting = lib_csw.Flag.Client()
             self.device_idx = lib_csw.DynamicSingleSwitch.Client()
             self.driver = lib_csw.DynamicSingleSwitch.Client()
             self.resolution = lib_csw.DynamicSingleSwitch.Client()
@@ -534,6 +710,9 @@ class Sheet:
             super().__init__()
             self.source_type = lib_csw.DynamicSingleSwitch.Host()
             self.stream_url = lib_csw.Text.Host()
+            self.stream_protocol = lib_csw.DynamicSingleSwitch.Host()
+            self.stream_client_hint = lib_csw.Text.Host()
+            self.stream_waiting = lib_csw.Flag.Host()
             self.device_idx = lib_csw.DynamicSingleSwitch.Host()
             self.driver = lib_csw.DynamicSingleSwitch.Host()
             self.resolution = lib_csw.DynamicSingleSwitch.Host()

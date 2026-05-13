@@ -102,7 +102,7 @@ class StandaloneCameraApp(qtx.QXMainApplication):
         
         # Timer to process backend messages (crucial for host-worker communication)
         self._timer = qtx.QXTimer(interval=5, timeout=self._on_timer, start=True)
-        print("Test UI Started. Select 'Network stream' in the 'Source type' dropdown to test your changes.")
+        print("Test UI Started. Use the Camera / Network stream tabs; on Network, pick a protocol or set DFL_STREAM_* env vars.")
 
     def _on_timer(self):
         self.backend_db.process_messages()
