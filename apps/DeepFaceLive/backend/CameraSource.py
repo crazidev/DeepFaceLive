@@ -3,6 +3,7 @@ import platform
 import subprocess
 import threading
 import time
+import atexit
 from datetime import datetime
 from enum import IntEnum
 from typing import List, Tuple, Union
@@ -170,25 +171,25 @@ class CameraSourceWorker(BackendWorker):
                           _DriverType.AVFOUNDATION: getattr(cv2, 'CAP_AVFOUNDATION', cv2.CAP_ANY),
                           }[state.driver]
 
-                print(f"Opening camera {state.device_idx} with api {cv_api}")
+                print(f"\033[94mOpening camera {state.device_idx} with api {cv_api}\033[0m")
                 vcap = cv2.VideoCapture(state.device_idx, cv_api)
                 if vcap.isOpened():
-                    print("Camera opened successfully")
+                    print("\033[92mCamera opened successfully\033[0m")
                     self.vcap = vcap
                     w, h = _ResolutionType_wh[state.resolution]
 
                     vcap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
                     vcap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
                 else:
-                    print("Failed to open camera")
+                    print("\033[91mFailed to open camera\033[0m")
             else:
-                print(f"Opening stream {state.stream_url}")
+                print(f"\033[94mOpening stream {state.stream_url}\033[0m")
                 vcap = cv2.VideoCapture(state.stream_url, cv2.CAP_FFMPEG)
                 if vcap.isOpened():
-                    print("Stream opened successfully")
+                    print("\033[92mStream opened successfully\033[0m")
                     self.vcap = vcap
                 else:
-                    print("Failed to open stream")
+                    print("\033[93mFailed to open stream\033[0m")
 
             if vcap.isOpened():
                 cs.fps.enable()
@@ -217,6 +218,8 @@ class CameraSourceWorker(BackendWorker):
             state.source_type = source_type
             self.save_state()
             if self.is_started():
+                self.stop_ffmpeg()
+                self.set_vcap(None)
                 self.restart()
 
     def on_cs_stream_url(self, stream_url):
@@ -225,6 +228,7 @@ class CameraSourceWorker(BackendWorker):
             state.stream_url = stream_url
             self.save_state()
             if self.is_started():
+                self.stop_ffmpeg()
                 self.restart()
 
     def on_cs_driver_selected(self, idx, driver):
@@ -320,17 +324,17 @@ class CameraSourceWorker(BackendWorker):
                 pass
             
             if is_file or (not is_listener):
-                print(f"Probing {'file' if is_file else 'stream'} {url}...")
+                print(f"\033[94mProbing {'file' if is_file else 'stream'} {url}...\033[0m")
                 probe_cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', url]
                 try:
                     res = subprocess.check_output(probe_cmd).decode().strip()
                     if 'x' in res:
                         w, h = map(int, res.split('x'))
-                        print(f"Resolution: {w}x{h}")
+                        print(f"\033[92mResolution: {w}x{h}\033[0m")
                 except:
-                    print("Failed to probe, using default 1280x720")
+                    print("\033[93mFailed to probe, using default 1280x720\033[0m")
             else:
-                print(f"Listener mode detected, waiting for connection on {url}...")
+                print(f"\033[93mListener mode detected, waiting for connection on {url}...\033[0m")
 
             cmd = ['ffmpeg']
             if is_listener:
@@ -353,26 +357,43 @@ class CameraSourceWorker(BackendWorker):
             w, h = 1280, 720
             
             self.ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=w*h*3*10)
+            
+            def cleanup_ffmpeg(proc):
+                if proc and proc.poll() is None:
+                    try:
+                        proc.kill()
+                    except:
+                        pass
+            atexit.register(cleanup_ffmpeg, self.ffmpeg_proc)
+
             self.ffmpeg_starting = False
             frame_size = w * h * 3
+            stream_connected = False
             while self.ffmpeg_proc is not None:
                 raw_frame = self.ffmpeg_proc.stdout.read(frame_size)
                 if len(raw_frame) != frame_size:
                     break
+                if not stream_connected:
+                    stream_connected = True
+                    print(f"\033[92m[✓] Stream connected and receiving frames: {url}\033[0m")
                 self.last_frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((h, w, 3))
         except Exception as e:
-            print(f"FFmpeg reader error: {e}")
+            print(f"\033[91mFFmpeg reader error: {e}\033[0m")
         finally:
             self.ffmpeg_starting = False
             if self.ffmpeg_proc:
                 self.ffmpeg_proc.terminate()
                 self.ffmpeg_proc = None
-            print("FFmpeg reader stopped")
+            print(f"\033[91m[X] FFmpeg reader stopped/disconnected: {url}\033[0m")
 
     def stop_ffmpeg(self):
         self.ffmpeg_starting = False
         if self.ffmpeg_proc:
             self.ffmpeg_proc.terminate()
+            try:
+                self.ffmpeg_proc.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                self.ffmpeg_proc.kill()
             self.ffmpeg_proc = None
         if self.ffmpeg_thread:
             # We don't join because it might block, let it die as daemon
