@@ -7,6 +7,7 @@ from .widgets.QCheckBoxCSWFlag import QCheckBoxCSWFlag
 from .widgets.QComboBoxCSWDynamicSingleSwitch import \
     QComboBoxCSWDynamicSingleSwitch
 from .widgets.QLabelPopupInfo import QLabelPopupInfo
+from .widgets.QLineEditCSWText import QLineEditCSWText
 from .widgets.QSpinBoxCSWNumber import QSpinBoxCSWNumber
 from .widgets.QXPushButtonCSWSignal import QXPushButtonCSWSignal
 
@@ -14,6 +15,12 @@ from .widgets.QXPushButtonCSWSignal import QXPushButtonCSWSignal
 class QCameraSource(QBackendPanel):
     def __init__(self, backend : CameraSource):
         cs = backend.get_control_sheet()
+
+        q_source_type_label = QLabelPopupInfo(label=L('@QCameraSource.source_type'), popup_info_text=L('@QCameraSource.help.source_type') )
+        q_source_type       = QComboBoxCSWDynamicSingleSwitch(cs.source_type, reflect_state_widgets=[q_source_type_label])
+
+        q_stream_url_label = QLabelPopupInfo(label=L('@QCameraSource.stream_url'), popup_info_text=L('@QCameraSource.help.stream_url') )
+        q_stream_url       = QLineEditCSWText(cs.stream_url, reflect_state_widgets=[q_stream_url_label])
 
         q_driver_label    = QLabelPopupInfo(label=L('@QCameraSource.driver'), popup_info_text=L('@QCameraSource.help.driver') )
         q_driver          = QComboBoxCSWDynamicSingleSwitch(cs.driver, reflect_state_widgets=[q_driver_label])
@@ -41,6 +48,12 @@ class QCameraSource(QBackendPanel):
 
         grid_l = qtx.QXGridLayout(spacing=5)
         row = 0
+        grid_l.addWidget(q_source_type_label, row, 0, alignment=qtx.AlignRight | qtx.AlignVCenter  )
+        grid_l.addWidget(q_source_type, row, 1, alignment=qtx.AlignLeft )
+        row += 1
+        grid_l.addWidget(q_stream_url_label, row, 0, alignment=qtx.AlignRight | qtx.AlignVCenter  )
+        grid_l.addWidget(q_stream_url, row, 1, alignment=qtx.AlignLeft )
+        row += 1
         grid_l.addWidget(q_driver_label, row, 0, alignment=qtx.AlignRight | qtx.AlignVCenter  )
         grid_l.addWidget(q_driver, row, 1, alignment=qtx.AlignLeft )
         row += 1

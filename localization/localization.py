@@ -284,6 +284,42 @@ class Localization:
                 'ja-JP' : 'カメラ入力',
                 'de-DE' : 'Kameraquelle'},
 
+    'QCameraSource.source_type':{
+                'en-US' : 'Source type',
+                'ru-RU' : 'Тип источника',
+                'zh-CN' : '源类型',
+                'es-ES' : 'Tipo de origen',
+                'it-IT' : 'Tipo di sorgente',
+                'ja-JP' : '入力タイプ',
+                'de-DE' : 'Quellentyp'},
+
+    'QCameraSource.help.source_type':{
+                'en-US' : 'Choose between a local camera device or a network stream URL.',
+                'ru-RU' : 'Выберите между локальной камерой или сетевым потоком.',
+                'zh-CN' : '选择本地摄像机设备或网络流 URL',
+                'es-ES' : 'Elija entre un dispositivo de cámara local o una URL de transmisión de red.',
+                'it-IT' : 'Scegliere tra un dispositivo videocamera locale o un URL di streaming di rete.',
+                'ja-JP' : 'ローカルカメラか、ネットワークストリームのURLかを選択します',
+                'de-DE' : 'Wählen Sie zwischen einem lokalen Kameragerät oder einer Netzwerk-Stream-URL.'},
+
+    'QCameraSource.stream_url':{
+                'en-US' : 'Stream URL',
+                'ru-RU' : 'URL потока',
+                'zh-CN' : '流 URL',
+                'es-ES' : 'URL de transmisión',
+                'it-IT' : 'URL dello streaming',
+                'ja-JP' : 'ストリームURL',
+                'de-DE' : 'Stream-URL'},
+
+    'QCameraSource.help.stream_url':{
+                'en-US' : 'Network stream URL. Supports RTSP, RTMP, SRT, HLS, UDP mpegts.\nExample: rtsp://user:pass@192.168.1.1:554/stream',
+                'ru-RU' : 'URL сетевого потока. Поддерживает RTSP, RTMP, SRT, HLS, UDP mpegts.\nПример: rtsp://user:pass@192.168.1.1:554/stream',
+                'zh-CN' : '网络流 URL。支持 RTSP, RTMP, SRT, HLS, UDP mpegts。\n例如: rtsp://user:pass@192.168.1.1:554/stream',
+                'es-ES' : 'URL de transmisión de red. Admite RTSP, RTMP, SRT, HLS, UDP mpegts.\nEjemplo: rtsp://user:pass@192.168.1.1:554/stream',
+                'it-IT' : 'URL dello streaming di rete. Supporta RTSP, RTMP, SRT, HLS, UDP mpegts.\nEsempio: rtsp://user:pass@192.168.1.1:554/stream',
+                'ja-JP' : 'ネットワークストリームのURL。RTSP, RTMP, SRT, HLS, UDP mpegtsに対応しています。\n例: rtsp://user:pass@192.168.1.1:554/stream',
+                'de-DE' : 'Netzwerk-Stream-URL. Unterstützt RTSP, RTMP, SRT, HLS, UDP mpegts.\nBeispiel: rtsp://user:pass@192.168.1.1:554/stream'},
+
     'QCameraSource.device_index':{
                 'en-US' : 'Device index',
                 'ru-RU' : 'Индекс устройства',

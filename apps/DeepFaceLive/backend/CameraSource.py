@@ -1,8 +1,11 @@
+import os
 import platform
+import subprocess
+import threading
 import time
 from datetime import datetime
 from enum import IntEnum
-from typing import List
+from typing import List, Tuple, Union
 
 import cv2
 import numpy as np
@@ -24,6 +27,14 @@ class CameraSource(BackendHost):
                          worker_start_args=[weak_heap, bc_out] )
 
     def get_control_sheet(self) -> 'Sheet.Host': return super().get_control_sheet()
+
+class _SourceType(IntEnum):
+    CAMERA_DEVICE = 0
+    NETWORK_STREAM = 1
+
+_SourceType_names = { _SourceType.CAMERA_DEVICE : 'Camera device',
+                      _SourceType.NETWORK_STREAM : 'Network stream',
+                    }
 
 class _ResolutionType(IntEnum):
     RES_320x240 = 0
@@ -56,11 +67,13 @@ class _DriverType(IntEnum):
     DSHOW = 1
     MSMF = 2
     GSTREAMER = 3
+    AVFOUNDATION = 4
 
 _DriverType_names = { _DriverType.COMPATIBLE : 'Compatible',
                       _DriverType.DSHOW : 'DirectShow',
                       _DriverType.MSMF : 'Microsoft Media Foundation',
                       _DriverType.GSTREAMER : 'GStreamer',
+                      _DriverType.AVFOUNDATION : 'AVFoundation (macOS)',
                     }
 
 class _RotationType(IntEnum):
@@ -82,11 +95,18 @@ class CameraSourceWorker(BackendWorker):
         self.bcd_uid = 0
         self.pending_bcd = None
         self.vcap = None
+        self.ffmpeg_proc = None
+        self.ffmpeg_thread = None
+        self.ffmpeg_starting = False
+        self.last_ffmpeg_start_time = 0
+        self.last_frame = None
         self.last_timestamp = 0
         lib_os.set_timer_resolution(4)
 
         state, cs = self.get_state(), self.get_control_sheet()
 
+        cs.source_type.call_on_selected(self.on_cs_source_type_selected)
+        cs.stream_url.call_on_text(self.on_cs_stream_url)
         cs.driver.call_on_selected(self.on_cs_driver_selected)
         cs.device_idx.call_on_selected(self.on_cs_device_idx_selected)
         cs.resolution.call_on_selected(self.on_cs_resolution_selected)
@@ -97,44 +117,78 @@ class CameraSourceWorker(BackendWorker):
         cs.load_settings.call_on_signal(self.on_cs_load_settings)
         cs.save_settings.call_on_signal(self.on_cs_save_settings)
 
-        cs.driver.enable()
+        cs.source_type.enable()
+        cs.source_type.set_choices(_SourceType, _SourceType_names, none_choice_name=None)
+        cs.source_type.select(state.source_type if state.source_type is not None else _SourceType.CAMERA_DEVICE)
+
+        cs.stream_url.enable()
+        cs.stream_url.set_text(state.stream_url if state.stream_url is not None else '')
+
+        if state.source_type == _SourceType.CAMERA_DEVICE:
+            cs.driver.enable()
         cs.driver.set_choices(_DriverType, _DriverType_names, none_choice_name='@misc.menu_select')
-        cs.driver.select(state.driver if state.driver is not None else _DriverType.DSHOW if platform.system() == 'Windows' else _DriverType.COMPATIBLE)
-
+        
+        default_driver = _DriverType.COMPATIBLE
         if platform.system() == 'Windows':
-            from xlib.api.win32 import ole32
-            from xlib.api.win32 import dshow
-            ole32.CoInitializeEx(0,0)
-            choices = [ f'{idx} : {name}' for idx, name in enumerate(dshow.get_video_input_devices_names()) ]
-            choices += [ f'{idx}' for idx in range(len(choices), 16) ]
-            ole32.CoUninitialize()
+            default_driver = _DriverType.DSHOW
+        elif platform.system() == 'Darwin':
+            default_driver = _DriverType.AVFOUNDATION
+            
+        cs.driver.select(state.driver if state.driver is not None else default_driver)
+
+        if state.source_type == _SourceType.CAMERA_DEVICE:
+            if platform.system() == 'Windows':
+                from xlib.api.win32 import ole32
+                from xlib.api.win32 import dshow
+                ole32.CoInitializeEx(0,0)
+                choices = [ f'{idx} : {name}' for idx, name in enumerate(dshow.get_video_input_devices_names()) ]
+                choices += [ f'{idx}' for idx in range(len(choices), 16) ]
+                ole32.CoUninitialize()
+            else:
+                choices = [ f'{idx}' for idx in range(16) ]
+
+            cs.device_idx.enable()
+            cs.device_idx.set_choices(choices, none_choice_name='@misc.menu_select')
+            cs.device_idx.select(state.device_idx)
+
+            cs.resolution.enable()
+            cs.resolution.set_choices(_ResolutionType, _ResolutionType_names, none_choice_name=None)
+            cs.resolution.select(state.resolution if state.resolution is not None else _ResolutionType.RES_640x480)
         else:
-            choices = [ f'{idx}' for idx in range(16) ]
+            cs.driver.disable()
+            cs.device_idx.disable()
+            cs.resolution.disable()
 
-        cs.device_idx.enable()
-        cs.device_idx.set_choices(choices, none_choice_name='@misc.menu_select')
-        cs.device_idx.select(state.device_idx)
+        if (state.source_type == _SourceType.CAMERA_DEVICE and state.device_idx is not None and state.driver is not None) or \
+           (state.source_type == _SourceType.NETWORK_STREAM and state.stream_url is not None and len(state.stream_url) != 0):
 
-        cs.resolution.enable()
-        cs.resolution.set_choices(_ResolutionType, _ResolutionType_names, none_choice_name=None)
-        cs.resolution.select(state.resolution if state.resolution is not None else _ResolutionType.RES_640x480)
+            if state.source_type == _SourceType.CAMERA_DEVICE:
+                cv_api = {_DriverType.COMPATIBLE: cv2.CAP_ANY,
+                          _DriverType.DSHOW: cv2.CAP_DSHOW,
+                          _DriverType.MSMF: cv2.CAP_MSMF,
+                          _DriverType.GSTREAMER: cv2.CAP_GSTREAMER,
+                          _DriverType.AVFOUNDATION: getattr(cv2, 'CAP_AVFOUNDATION', cv2.CAP_ANY),
+                          }[state.driver]
 
-        if state.device_idx is not None and \
-           state.driver is not None:
+                print(f"Opening camera {state.device_idx} with api {cv_api}")
+                vcap = cv2.VideoCapture(state.device_idx, cv_api)
+                if vcap.isOpened():
+                    print("Camera opened successfully")
+                    self.vcap = vcap
+                    w, h = _ResolutionType_wh[state.resolution]
 
-            cv_api = {_DriverType.COMPATIBLE: cv2.CAP_ANY,
-                      _DriverType.DSHOW: cv2.CAP_DSHOW,
-                      _DriverType.MSMF: cv2.CAP_MSMF,
-                      _DriverType.GSTREAMER: cv2.CAP_GSTREAMER,
-                      }[state.driver]
-
-            vcap = cv2.VideoCapture(state.device_idx, cv_api)
-            if vcap.isOpened():
-                self.vcap = vcap
-                w, h = _ResolutionType_wh[state.resolution]
-
-                vcap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-                vcap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                    vcap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                    vcap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                else:
+                    print("Failed to open camera")
+            else:
+                print(f"Opening stream {state.stream_url}")
+                vcap = cv2.VideoCapture(state.stream_url, cv2.CAP_FFMPEG)
+                if vcap.isOpened():
+                    print("Stream opened successfully")
+                    self.vcap = vcap
+                else:
+                    print("Failed to open stream")
 
             if vcap.isOpened():
                 cs.fps.enable()
@@ -154,7 +208,24 @@ class CameraSourceWorker(BackendWorker):
                 cs.load_settings.enable()
                 cs.save_settings.enable()
             else:
-                cs.device_idx.unselect()
+                if state.source_type == _SourceType.CAMERA_DEVICE:
+                    cs.device_idx.unselect()
+
+    def on_cs_source_type_selected(self, idx, source_type):
+        cs, state = self.get_control_sheet(), self.get_state()
+        if state.source_type != source_type:
+            state.source_type = source_type
+            self.save_state()
+            if self.is_started():
+                self.restart()
+
+    def on_cs_stream_url(self, stream_url):
+        cs, state = self.get_control_sheet(), self.get_state()
+        if state.stream_url != stream_url:
+            state.stream_url = stream_url
+            self.save_state()
+            if self.is_started():
+                self.restart()
 
     def on_cs_driver_selected(self, idx, driver):
         cs, state = self.get_control_sheet(), self.get_state()
@@ -227,56 +298,164 @@ class CameraSourceWorker(BackendWorker):
             state.settings_by_idx[state.device_idx] = settings
             self.save_state()
 
-    def on_tick(self):
-        if self.vcap is not None and not self.vcap.isOpened():
-            self.set_vcap(None)
-
+    def set_vcap(self, vcap):
         if self.vcap is not None:
-            state, cs = self.get_state(), self.get_control_sheet()
+            self.vcap.release()
+        self.vcap = vcap
 
-            self.start_profile_timing()
-            ret, img = self.vcap.read()
-            if ret:
-                timestamp = datetime.now().timestamp()
-                fps = state.fps
-                if fps == 0 or ((timestamp - self.last_timestamp) > 1.0 / fps):
+    def _ffmpeg_reader(self, url):
+        self.ffmpeg_starting = True
+        try:
+            if url.startswith('udp://') and 'reuse=1' not in url:
+                if '?' in url: url += '&reuse=1'
+                else: url += '?reuse=1'
+            
+            is_file = os.path.exists(url)
+            is_listener = 'listen=1' in url or 'mode=listener' in url or url.startswith('udp://')
 
-                    if fps != 0:
-                        if timestamp - self.last_timestamp >= 1.0:
-                            self.last_timestamp = timestamp
-                        else:
-                            self.last_timestamp += 1.0 / fps
+            # We try to probe the stream first to get resolution, unless it's a listener
+            w, h = 1280, 720 # Default
+            if not is_listener and not is_file:
+                # If it's a file, we should probe it
+                pass
+            
+            if is_file or (not is_listener):
+                print(f"Probing {'file' if is_file else 'stream'} {url}...")
+                probe_cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', url]
+                try:
+                    res = subprocess.check_output(probe_cmd).decode().strip()
+                    if 'x' in res:
+                        w, h = map(int, res.split('x'))
+                        print(f"Resolution: {w}x{h}")
+                except:
+                    print("Failed to probe, using default 1280x720")
+            else:
+                print(f"Listener mode detected, waiting for connection on {url}...")
 
-                    ip = ImageProcessor(img)
-                    ip.ch(3).to_uint8()
+            cmd = ['ffmpeg']
+            if is_listener:
+                if url.startswith('rtsp://'):
+                    cmd += ['-rtsp_flags', 'listen', '-listen_timeout', '-1']
+                elif url.startswith('srt://') or url.startswith('udp://'):
+                    # SRT and UDP listeners are handled via URL parameters or implied
+                    pass
+                else:
+                    cmd += ['-listen', '1']
+            
+            # Low latency flags
+            cmd += ['-fflags', 'nobuffer', '-flags', 'low_delay']
 
-                    w, h = _ResolutionType_wh[state.resolution]
-                    ip.fit_in(TW=w)
+            if is_file:
+                cmd += ['-re', '-stream_loop', '-1']
+            cmd += ['-i', url, '-vf', 'scale=1280:720,format=bgr24', '-f', 'image2pipe', '-vcodec', 'rawvideo', '-loglevel', 'error', '-']
+            
+            # Force resolution to match our scale filter
+            w, h = 1280, 720
+            
+            self.ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=w*h*3*10)
+            self.ffmpeg_starting = False
+            frame_size = w * h * 3
+            while self.ffmpeg_proc is not None:
+                raw_frame = self.ffmpeg_proc.stdout.read(frame_size)
+                if len(raw_frame) != frame_size:
+                    break
+                self.last_frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((h, w, 3))
+        except Exception as e:
+            print(f"FFmpeg reader error: {e}")
+        finally:
+            self.ffmpeg_starting = False
+            if self.ffmpeg_proc:
+                self.ffmpeg_proc.terminate()
+                self.ffmpeg_proc = None
+            print("FFmpeg reader stopped")
 
-                    rotation = state.rotation
-                    if rotation == _RotationType.ROTATION_90:
-                        ip.rotate90()
-                    elif rotation == _RotationType.ROTATION_180:
-                        ip.rotate180()
-                    elif rotation == _RotationType.ROTATION_270:
-                        ip.rotate270()
+    def stop_ffmpeg(self):
+        self.ffmpeg_starting = False
+        if self.ffmpeg_proc:
+            self.ffmpeg_proc.terminate()
+            self.ffmpeg_proc = None
+        if self.ffmpeg_thread:
+            # We don't join because it might block, let it die as daemon
+            self.ffmpeg_thread = None
+        self.last_frame = None
 
-                    if state.flip_horizontal:
-                        ip.flip_horizontal()
+    def on_stop(self):
+        self.stop_ffmpeg()
+        super().on_stop()
 
-                    img = ip.get_image('HWC')
+    def on_tick(self):
+        state, cs = self.get_state(), self.get_control_sheet()
 
-                    bcd_uid = self.bcd_uid = self.bcd_uid + 1
-                    bcd = BackendConnectionData(uid=bcd_uid)
+        if state.source_type == _SourceType.CAMERA_DEVICE:
+            if self.vcap is not None and not self.vcap.isOpened():
+                self.set_vcap(None)
 
-                    bcd.assign_weak_heap(self.weak_heap)
-                    frame_name = f'Camera_{state.device_idx}_{bcd_uid:06}'
-                    bcd.set_frame_image_name(frame_name)
-                    bcd.set_frame_num(bcd_uid)
-                    bcd.set_frame_timestamp(timestamp)
-                    bcd.set_image(frame_name, img)
-                    self.stop_profile_timing()
-                    self.pending_bcd = bcd
+            if self.vcap is not None:
+                self.start_profile_timing()
+                ret, img = self.vcap.read()
+                if ret:
+                    self._process_frame(img)
+        else:
+            if self.ffmpeg_proc is None and not self.ffmpeg_starting:
+                if state.stream_url:
+                    now = time.time()
+                    if now - self.last_ffmpeg_start_time > 5.0: # Retry delay
+                        self.last_ffmpeg_start_time = now
+                        self.ffmpeg_thread = threading.Thread(target=self._ffmpeg_reader, args=(state.stream_url,), daemon=True)
+                        self.ffmpeg_thread.start()
+            
+            if self.last_frame is not None:
+                self.start_profile_timing()
+                img = self.last_frame
+                self.last_frame = None
+                self._process_frame(img)
+
+    def _process_frame(self, img):
+        state, cs = self.get_state(), self.get_control_sheet()
+        self.stop_profile_timing()
+        timestamp = datetime.now().timestamp()
+        fps = state.fps
+        if fps is None:
+            fps = 0
+            
+        if fps == 0 or ((timestamp - self.last_timestamp) > 1.0 / fps):
+            if fps != 0:
+                if timestamp - self.last_timestamp >= 1.0:
+                    self.last_timestamp = timestamp
+                else:
+                    self.last_timestamp += 1.0 / fps
+
+            ip = ImageProcessor(img)
+            ip.ch(3).to_uint8()
+
+            if state.source_type == _SourceType.CAMERA_DEVICE:
+                w, h = _ResolutionType_wh[state.resolution]
+                ip.fit_in(TW=w)
+
+            rotation = state.rotation
+            if rotation == _RotationType.ROTATION_90: ip.rotate90()
+            elif rotation == _RotationType.ROTATION_180: ip.rotate180()
+            elif rotation == _RotationType.ROTATION_270: ip.rotate270()
+
+            if state.flip_horizontal:
+                ip.flip_horizontal()
+
+            img = ip.get_image('HWC')
+
+            bcd_uid = self.bcd_uid = self.bcd_uid + 1
+            bcd = BackendConnectionData(uid=bcd_uid)
+            bcd.assign_weak_heap(self.weak_heap)
+            
+            if state.source_type == _SourceType.CAMERA_DEVICE:
+                frame_name = f'Camera_{state.device_idx}_{bcd_uid:06}'
+            else:
+                frame_name = f'Stream_{bcd_uid:06}'
+            
+            bcd.set_frame_image_name(frame_name)
+            bcd.set_frame_num(bcd_uid)
+            bcd.set_frame_timestamp(timestamp)
+            bcd.set_image(frame_name, img)
+            self.pending_bcd = bcd
 
         if self.pending_bcd is not None:
             if self.bc_out.is_full_read(1):
@@ -284,19 +463,6 @@ class CameraSourceWorker(BackendWorker):
                 self.pending_bcd = None
 
         time.sleep(0.001)
-
-    def set_vcap(self, vcap):
-        if self.vcap is not None:
-            if self.vcap.isOpened():
-                self.vcap.release()
-            self.vcap = None
-        self.vcap = vcap
-
-    def on_stop(self):
-        if self.vcap is not None:
-            if self.vcap.isOpened():
-                self.vcap.release()
-            self.vcap = None
 
     def _get_vcap_setting_name_list(self) -> List[str]:
         return ['CAP_PROP_BRIGHTNESS',
@@ -316,6 +482,8 @@ class CameraSourceWorker(BackendWorker):
 
 class WorkerState(BackendWorkerState):
     def __init__(self):
+        self.source_type : _SourceType = None
+        self.stream_url : str = None
         self.device_idx : int = None
         self.driver : _DriverType = None
         self.resolution : _ResolutionType = None
@@ -328,6 +496,8 @@ class Sheet:
     class Host(lib_csw.Sheet.Host):
         def __init__(self):
             super().__init__()
+            self.source_type = lib_csw.DynamicSingleSwitch.Client()
+            self.stream_url = lib_csw.Text.Client()
             self.device_idx = lib_csw.DynamicSingleSwitch.Client()
             self.driver = lib_csw.DynamicSingleSwitch.Client()
             self.resolution = lib_csw.DynamicSingleSwitch.Client()
@@ -341,6 +511,8 @@ class Sheet:
     class Worker(lib_csw.Sheet.Worker):
         def __init__(self):
             super().__init__()
+            self.source_type = lib_csw.DynamicSingleSwitch.Host()
+            self.stream_url = lib_csw.Text.Host()
             self.device_idx = lib_csw.DynamicSingleSwitch.Host()
             self.driver = lib_csw.DynamicSingleSwitch.Host()
             self.resolution = lib_csw.DynamicSingleSwitch.Host()
