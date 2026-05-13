@@ -63,7 +63,8 @@ class QLiveSwap(qtx.QXWidget):
         face_swap_dfm   = self.face_swap_dfm   = backend.FaceSwapDFM  (weak_heap=backend_weak_heap, reemit_frame_signal=reemit_frame_signal, bc_in=face_aligner_bc_out, bc_out=face_swapper_bc_out, dfm_models_path=dfm_models_path, backend_db=backend_db )
         frame_adjuster = self.frame_adjuster = backend.FrameAdjuster(weak_heap=backend_weak_heap, reemit_frame_signal=reemit_frame_signal, bc_in=face_swapper_bc_out, bc_out=frame_adjuster_bc_out, backend_db=backend_db )
         face_merger    = self.face_merger    = backend.FaceMerger   (weak_heap=backend_weak_heap, reemit_frame_signal=reemit_frame_signal, bc_in=frame_adjuster_bc_out, bc_out=face_merger_bc_out, backend_db=backend_db )
-        stream_output  = self.stream_output  = backend.StreamOutput (weak_heap=backend_weak_heap, reemit_frame_signal=reemit_frame_signal, bc_in=face_merger_bc_out, save_default_path=userdata_path, backend_db=backend_db)
+        face_pipeline_hosts = (face_detector, face_marker, face_aligner, face_animator, face_swap_insight, face_swap_dfm, frame_adjuster, face_merger)
+        stream_output  = self.stream_output  = backend.StreamOutput (weak_heap=backend_weak_heap, reemit_frame_signal=reemit_frame_signal, bc_in_pipeline=face_merger_bc_out, bc_in_direct=multi_sources_bc_out, face_pipeline_hosts=face_pipeline_hosts, save_default_path=userdata_path, backend_db=backend_db)
 
         self.all_backends : List[backend.BackendHost] = [file_source, camera_source, face_detector, face_marker, face_aligner, face_animator, face_swap_insight, face_swap_dfm, frame_adjuster, face_merger, stream_output]
 

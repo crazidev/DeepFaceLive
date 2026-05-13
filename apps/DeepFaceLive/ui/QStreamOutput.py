@@ -21,6 +21,9 @@ class QStreamOutput(QBackendPanel):
     def __init__(self, backend : StreamOutput):
         cs = backend.get_control_sheet()
 
+        q_input_route_label = QLabelPopupInfo(label=L('@StreamOutput.input_route'), popup_info_text=L('@StreamOutput.help.input_route'))
+        q_input_route       = QComboBoxCSWDynamicSingleSwitch(cs.input_route, reflect_state_widgets=[q_input_route_label])
+
         q_average_fps_label = QLabelPopupInfo(label=L('@QStreamOutput.avg_fps'), popup_info_text=L('@QStreamOutput.help.avg_fps'))
         q_average_fps       = QLabelCSWNumber(cs.avg_fps, reflect_state_widgets=[q_average_fps_label])
 
@@ -50,6 +53,9 @@ class QStreamOutput(QBackendPanel):
 
         grid_l = qtx.QXGridLayout(spacing=5)
         row = 0
+        grid_l.addWidget(q_input_route_label, row, 0, 1, 1, alignment=qtx.AlignRight | qtx.AlignVCenter )
+        grid_l.addWidget(q_input_route, row, 1, 1, 2, alignment=qtx.AlignLeft | qtx.AlignVCenter )
+        row += 1
         grid_l.addWidget(q_average_fps_label, row, 0, 1, 1, alignment=qtx.AlignRight | qtx.AlignVCenter )
         grid_l.addWidget(q_average_fps, row, 1, 1, 2, alignment=qtx.AlignLeft | qtx.AlignVCenter )
         row += 1

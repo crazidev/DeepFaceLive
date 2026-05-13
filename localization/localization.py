@@ -1581,4 +1581,40 @@ class Localization:
                 'it-IT' : 'Faccia allineata e scambiata',
                 'ja-JP' : 'アライン済の顔と合成される顔',
                 'de-DE' : 'Ausgerichtete und getauschte Gesichter'},
+
+    'StreamOutput.InputRoute.PIPELINE':{
+                'en-US' : 'After face pipeline',
+                'ru-RU' : 'После цепочки обработки лица',
+                'zh-CN' : '人脸处理管线之后',
+                'es-ES' : 'Tras la cadena de procesado facial',
+                'it-IT' : 'Dopo la pipeline volti',
+                'ja-JP' : '顔処理パイプライン後',
+                'de-DE' : 'Nach der Gesichts-Pipeline'},
+
+    'StreamOutput.InputRoute.SOURCE_DIRECT':{
+                'en-US' : 'Direct from camera/file (no face pipeline)',
+                'ru-RU' : 'Напрямую с камеры/файла (без обработки лица)',
+                'zh-CN' : '直接从摄像头/文件（无人脸管线）',
+                'es-ES' : 'Directo desde cámara/archivo (sin pipeline facial)',
+                'it-IT' : 'Diretto da camera/file (senza pipeline volti)',
+                'ja-JP' : 'カメラ/ファイルから直接（顔パイプラインなし）',
+                'de-DE' : 'Direkt von Kamera/Datei (ohne Gesichts-Pipeline)'},
+
+    'StreamOutput.input_route':{
+                'en-US' : 'Frame source',
+                'ru-RU' : 'Источник кадров',
+                'zh-CN' : '帧来源',
+                'es-ES' : 'Origen de fotogramas',
+                'it-IT' : 'Origine fotogrammi',
+                'ja-JP' : 'フレーム入力元',
+                'de-DE' : 'Frame-Quelle'},
+
+    'StreamOutput.help.input_route':{
+                'en-US' : 'Direct mode reads the same ring as Camera/File source and stops the face modules so you can test streaming without GPU load. Pipeline mode uses merged output from Face merger as before. Before turning off the Stream output module while in direct mode, switch back to Pipeline so the face chain can run again.',
+                'ru-RU' : 'Прямой режим читает ту же очередь, что и камера/файл, и останавливает модули лица — для теста стрима без нагрузки на GPU. Режим pipeline — как раньше, после Face merger. Перед отключением модуля Stream output в прямом режиме переключитесь обратно на Pipeline.',
+                'zh-CN' : '直连模式读取与摄像头/文件相同的队列并停止人脸模块，便于在无 GPU 负载下测试推流。管线模式仍从人脸合并模块输出。在直连模式下关闭 Stream output 前请先切回管线模式以恢复人脸链。',
+                'es-ES' : 'El modo directo lee la misma cola que cámara/archivo y detiene los módulos faciales para probar streaming sin carga de GPU. El modo pipeline usa la salida fusionada como antes. Antes de desactivar Stream output en modo directo, vuelva a Pipeline.',
+                'it-IT' : 'La modalità diretta legge la stessa coda di camera/file e ferma i moduli volti per testare lo streaming senza GPU. La pipeline usa l\'uscita del merger come prima. Prima di disattivare Stream output in diretta, tornare a Pipeline.',
+                'ja-JP' : '直接モードはカメラ/ファイルと同じリングを読み、顔モジュールを停止して GPU 負荷なしで配信テストができます。パイプラインは従来どおり Face merger 経由です。直接モードのまま Stream output を切る前にパイプラインへ戻してください。',
+                'de-DE' : 'Direktmodus liest dieselbe Ringpuffer wie Kamera/Datei und stoppt die Gesichtsmodule zum Stream-Test ohne GPU-Last. Pipeline liefert wie zuvor nach dem Face Merger. Vor dem Abschalten von Stream output im Direktmodus wieder auf Pipeline wechseln.'},
     }

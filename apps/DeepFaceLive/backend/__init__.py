@@ -11,4 +11,4 @@ from .FaceSwapInsight import FaceSwapInsight
 from .FaceSwapDFM import FaceSwapDFM
 from .FileSource import FileSource
 from .FrameAdjuster import FrameAdjuster
-from .StreamOutput import StreamOutput
+from .StreamOutput import InputRoute, StreamOutput

@@ -28,7 +28,7 @@ class FFMPEGStreamer:
                 '-f', 'rawvideo',
                 '-vcodec','rawvideo',
                 '-pix_fmt', 'bgr24',
-                '-s', f'{self._width}:{self._height}',
+                '-s', f'{self._width}x{self._height}',
                 '-i', '-',
                 '-f', 'mpegts',
                 '-q:v', '2',

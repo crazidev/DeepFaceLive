@@ -78,6 +78,24 @@ If you want to use your phone's high-quality camera wirelessly:
 
 ---
 
+## Docker and Stream Output (MPEG-TS over UDP)
+
+The **Stream output** panel sends MPEG-TS with FFmpeg to `udp://<address>:<port>` (push). The default address `127.0.0.1` is **only the container’s loopback**; another PC on the LAN will not receive those packets.
+
+1. **Use the host network (simplest on Linux)** so the app sees the same interfaces as the host, then set **Stream address** in the UI to the LAN IP of the machine that will receive the stream (e.g. your OBS/VLC box), or use `0.0.0.0` only if your workflow expects binding that way:
+
+   ```bash
+   docker run --network host ... your-image ...
+   ```
+
+2. **Publish UDP without host networking:** FFmpeg is **pushing** to a destination IP. Point **Stream address** at the **receiver’s reachable IP** (often the host’s LAN IP from inside the container, e.g. Docker bridge gateway `172.17.0.1` on Linux, or a fixed host IP). `-p 1234:1234/udp` maps **inbound** UDP into the container; it does **not** by itself forward **outbound** UDP from FFmpeg to `127.0.0.1` on the host. Prefer `--network host` or the correct destination IP for your topology.
+
+3. **Firewall:** allow UDP on the chosen port on sender and receiver.
+
+For **inbound** network camera URLs into DeepFaceLive inside Docker, continue to use `DFL_STREAM_BIND_HOST`, `DFL_STREAM_PORT_*`, and `-p` on those listen ports as needed.
+
+---
+
 ## Troubleshooting
 
 *   **"Address already in use" Error (UDP):** This means a previous FFmpeg process didn't close properly. You can fix this by running `pkill -9 ffmpeg` in your terminal to clear stuck ports.

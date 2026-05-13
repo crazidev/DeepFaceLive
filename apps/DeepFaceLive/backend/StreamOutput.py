@@ -1,6 +1,6 @@
 from enum import IntEnum
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -17,21 +17,81 @@ from .BackendBase import (BackendConnection, BackendDB, BackendHost,
                           BackendWorkerState)
 
 
+class InputRoute(IntEnum):
+    """Where StreamOutput reads BackendConnectionData from."""
+    PIPELINE = 0
+    SOURCE_DIRECT = 1
+
+
+_InputRoute_names = {
+    InputRoute.PIPELINE: '@StreamOutput.InputRoute.PIPELINE',
+    InputRoute.SOURCE_DIRECT: '@StreamOutput.InputRoute.SOURCE_DIRECT',
+}
+
+
 class StreamOutput(BackendHost):
     """
     Bufferizes and shows the stream in separated window.
     """
     def __init__(self, weak_heap : BackendWeakHeap,
                        reemit_frame_signal : BackendSignal,
-                       bc_in : BackendConnection,
+                       bc_in_pipeline : BackendConnection,
+                       bc_in_direct : Optional[BackendConnection] = None,
+                       face_pipeline_hosts : Optional[Sequence[BackendHost]] = None,
                        save_default_path : Path = None,
                        backend_db : BackendDB = None):
+
+        self._face_pipeline_hosts = tuple(face_pipeline_hosts) if face_pipeline_hosts else tuple()
+        self._face_pipeline_snapshot : Optional[List[Tuple[BackendHost, bool]]] = None
 
         super().__init__(backend_db=backend_db,
                          sheet_cls=Sheet,
                          worker_cls=StreamOutputWorker,
                          worker_state_cls=WorkerState,
-                         worker_start_args=[weak_heap, reemit_frame_signal, bc_in, save_default_path] )
+                         worker_start_args=[weak_heap, reemit_frame_signal, bc_in_pipeline, bc_in_direct, save_default_path] )
+
+        self.call_on_msg('_dfl_suspend_face_pipeline', self._host_suspend_face_pipeline)
+        self.call_on_msg('_dfl_resume_face_pipeline', self._host_resume_face_pipeline)
+
+    def _host_suspend_face_pipeline(self):
+        if self._face_pipeline_snapshot is not None or not self._face_pipeline_hosts:
+            self.send_msg('_direct_route_ack')
+            return
+        snap = []
+        for h in self._face_pipeline_hosts:
+            was = h.is_started()
+            snap.append((h, was))
+            if was:
+                h.stop()
+        self._face_pipeline_snapshot = snap
+        for _ in range(5000):
+            busy = False
+            for h, _was in snap:
+                h.process_messages()
+                if h.is_starting() or h.is_stopping():
+                    busy = True
+            if not busy:
+                break
+        self.send_msg('_direct_route_ack')
+
+    def _host_resume_face_pipeline(self):
+        if self._face_pipeline_snapshot is None:
+            self.send_msg('_pipeline_route_ack')
+            return
+        snap = self._face_pipeline_snapshot
+        self._face_pipeline_snapshot = None
+        for h, was_started in snap:
+            if was_started:
+                h.start()
+        for _ in range(5000):
+            busy = False
+            for h, _ in snap:
+                h.process_messages()
+                if h.is_starting():
+                    busy = True
+            if not busy:
+                break
+        self.send_msg('_pipeline_route_ack')
 
     def get_control_sheet(self) -> 'Sheet.Host': return super().get_control_sheet()
 
@@ -61,12 +121,69 @@ class StreamOutputWorker(BackendWorker):
     def get_state(self) -> 'WorkerState': return super().get_state()
     def get_control_sheet(self) -> 'Sheet.Worker': return super().get_control_sheet()
 
+    def _on_direct_route_ack(self):
+        self._pending_direct_ack = False
+
+    def _on_pipeline_route_ack(self):
+        self._pending_pipeline_ack = False
+
+    def _wait_direct_ack(self):
+        self._pending_direct_ack = True
+        self.send_msg('_dfl_suspend_face_pipeline')
+        while self._pending_direct_ack:
+            self._pmpi.process_messages(0.02)
+
+    def _wait_pipeline_ack(self):
+        self._pending_pipeline_ack = True
+        self.send_msg('_dfl_resume_face_pipeline')
+        while self._pending_pipeline_ack:
+            self._pmpi.process_messages(0.02)
+
+    def _apply_input_route_controls(self, sync_input_route_widget=False):
+        """
+        sync_input_route_widget: True only from on_start. set_choices() on input_route calls
+        unselect() internally, which re-enters on_cs_input_route with route=None and would
+        recurse if we set_choices again from that handler.
+        """
+        state, cs = self.get_state(), self.get_control_sheet()
+        if self.bc_in_direct is None:
+            cs.input_route.disable()
+            cs.source_type.enable()
+            cs.source_type.set_choices(SourceType, ViewModeNames, none_choice_name='@misc.menu_select')
+            st = state.source_type if state.source_type is not None else SourceType.SOURCE_FRAME
+            cs.source_type.select(st)
+            self.on_cs_source_type(0, st)
+            return
+        cs.input_route.enable()
+        if sync_input_route_widget:
+            cs.input_route.set_choices(InputRoute, _InputRoute_names, none_choice_name=None)
+            cs.input_route.select(state.input_route if state.input_route is not None else InputRoute.PIPELINE)
+        if state.input_route == InputRoute.SOURCE_DIRECT:
+            cs.source_type.disable()
+            state.source_type = SourceType.SOURCE_FRAME
+            cs.source_type.set_choices(SourceType, ViewModeNames, none_choice_name=None)
+            cs.source_type.select(SourceType.SOURCE_FRAME)
+            cs.aligned_face_id.disable()
+        else:
+            cs.source_type.enable()
+            cs.source_type.set_choices(SourceType, ViewModeNames, none_choice_name='@misc.menu_select')
+            st = state.source_type if state.source_type is not None else SourceType.SOURCE_FRAME
+            cs.source_type.select(st)
+            self.on_cs_source_type(0, st)
+
     def on_start(self, weak_heap : BackendWeakHeap, reemit_frame_signal : BackendSignal,
-                       bc_in : BackendConnection,
+                       bc_in_pipeline : BackendConnection,
+                       bc_in_direct : Optional[BackendConnection],
                        save_default_path : Path):
         self.weak_heap = weak_heap
         self.reemit_frame_signal = reemit_frame_signal
-        self.bc_in = bc_in
+        self.bc_in_pipeline = bc_in_pipeline
+        self.bc_in_direct = bc_in_direct
+
+        self.call_on_msg('_direct_route_ack', self._on_direct_route_ack)
+        self.call_on_msg('_pipeline_route_ack', self._on_pipeline_route_ack)
+        self._pending_direct_ack = False
+        self._pending_pipeline_ack = False
 
         self.fps_counter = lib_time.FPSCounter()
 
@@ -84,6 +201,7 @@ class StreamOutputWorker(BackendWorker):
 
         state, cs = self.get_state(), self.get_control_sheet()
 
+        cs.input_route.call_on_selected(self.on_cs_input_route)
         cs.source_type.call_on_selected(self.on_cs_source_type)
         cs.show_hide_window.call_on_signal(self.on_cs_show_hide_window_signal)
         cs.aligned_face_id.call_on_number(self.on_cs_aligned_face_id)
@@ -94,9 +212,15 @@ class StreamOutputWorker(BackendWorker):
         cs.stream_addr.call_on_text(self.on_cs_stream_addr)
         cs.stream_port.call_on_number(self.on_cs_stream_port)
 
-        cs.source_type.enable()
-        cs.source_type.set_choices(SourceType, ViewModeNames, none_choice_name='@misc.menu_select')
-        cs.source_type.select(state.source_type)
+        if state.input_route is None:
+            state.input_route = InputRoute.PIPELINE
+        if self.bc_in_direct is None:
+            state.input_route = InputRoute.PIPELINE
+
+        if state.source_type is None:
+            state.source_type = SourceType.SOURCE_FRAME
+
+        self._apply_input_route_controls(sync_input_route_widget=True)
 
         cs.target_delay.enable()
         cs.target_delay.set_config(lib_csw.Number.Config(min=0, max=5000, step=100, decimals=0, allow_instant_update=True))
@@ -133,11 +257,38 @@ class StreamOutputWorker(BackendWorker):
         cs.stream_port.set_config(lib_csw.Number.Config(min=1, max=9999, decimals=0, allow_instant_update=True))
         cs.stream_port.set_number(state.stream_port if state.stream_port is not None else 1234)
 
+        if self.bc_in_direct is not None and state.input_route == InputRoute.SOURCE_DIRECT:
+            self._wait_direct_ack()
+
     def on_stop(self):
         self._streamer.stop()
 
+    def on_cs_input_route(self, idx, route : InputRoute):
+        state, cs = self.get_state(), self.get_control_sheet()
+        if self.bc_in_direct is None:
+            return
+        # set_choices() issues unselect() first; ignore that re-entrant callback.
+        if route is None:
+            return
+        if state.input_route == route:
+            return
+        prev = state.input_route
+        if route == InputRoute.SOURCE_DIRECT:
+            self._wait_direct_ack()
+            state.input_route = route
+            self.save_state()
+            self._apply_input_route_controls(sync_input_route_widget=False)
+        else:
+            if prev == InputRoute.SOURCE_DIRECT:
+                self._wait_pipeline_ack()
+            state.input_route = route
+            self.save_state()
+            self._apply_input_route_controls(sync_input_route_widget=False)
+
     def on_cs_source_type(self, idx, source_type):
         state, cs = self.get_state(), self.get_control_sheet()
+        if state.input_route == InputRoute.SOURCE_DIRECT:
+            return
         if source_type in [SourceType.ALIGNED_FACE, SourceType.ALIGNED_N_SWAPPED_FACE]:
             cs.aligned_face_id.enable()
             cs.aligned_face_id.set_config(lib_csw.Number.Config(min=0, max=16, step=1, allow_instant_update=True))
@@ -228,7 +379,11 @@ class StreamOutputWorker(BackendWorker):
     def on_tick(self):
         cs, state = self.get_control_sheet(), self.get_state()
 
-        bcd = self.bc_in.read(timeout=0.005)
+        active_bc = self.bc_in_pipeline
+        if self.bc_in_direct is not None and state.input_route == InputRoute.SOURCE_DIRECT:
+            active_bc = self.bc_in_direct
+
+        bcd = active_bc.read(timeout=0.005)
         if bcd is not None:
             bcd.assign_weak_heap(self.weak_heap)
             cs.avg_fps.set_number( self.fps_counter.step() )
@@ -238,7 +393,7 @@ class StreamOutputWorker(BackendWorker):
             if frame_num < prev_frame_num:
                 prev_frame_num = self.prev_frame_num = -1
 
-            source_type = state.source_type
+            source_type = SourceType.SOURCE_FRAME if state.input_route == InputRoute.SOURCE_DIRECT else state.source_type
             if source_type is not None and \
                 (state.is_showing_window or \
                  state.sequence_path is not None or \
@@ -312,16 +467,15 @@ class StreamOutputWorker(BackendWorker):
                             filename = f'{n:06}'
                             lib_cv.imwrite(state.sequence_path / (filename+file_ext), img, cv_args)
 
+                    if state.is_streaming:
+                        stream_img = ImageProcessor(view_image).to_uint8().get_image('HWC')
+                        self._streamer.push_frame(stream_img)
+
                 pr = buffered_frames.process()
 
                 img = pr.new_data
-                if img is not None:
-                    if state.is_streaming:
-                        img = ImageProcessor(view_image).to_uint8().get_image('HWC')
-                        self._streamer.push_frame(img)
-
-                    if state.is_showing_window:
-                        cv2.imshow(self._wnd_name, img)
+                if img is not None and state.is_showing_window:
+                    cv2.imshow(self._wnd_name, img)
 
         if state.is_showing_window:
             cv2.waitKey(1)
@@ -330,6 +484,7 @@ class Sheet:
     class Host(lib_csw.Sheet.Host):
         def __init__(self):
             super().__init__()
+            self.input_route = lib_csw.DynamicSingleSwitch.Client()
             self.source_type = lib_csw.DynamicSingleSwitch.Client()
             self.aligned_face_id = lib_csw.Number.Client()
             self.target_delay = lib_csw.Number.Client()
@@ -345,6 +500,7 @@ class Sheet:
     class Worker(lib_csw.Sheet.Worker):
         def __init__(self):
             super().__init__()
+            self.input_route = lib_csw.DynamicSingleSwitch.Host()
             self.source_type = lib_csw.DynamicSingleSwitch.Host()
             self.aligned_face_id = lib_csw.Number.Host()
             self.target_delay = lib_csw.Number.Host()
@@ -358,6 +514,7 @@ class Sheet:
             self.stream_port = lib_csw.Number.Host()
 
 class WorkerState(BackendWorkerState):
+    input_route : InputRoute = None
     source_type : SourceType = None
     is_showing_window : bool = None
     aligned_face_id : int = None
