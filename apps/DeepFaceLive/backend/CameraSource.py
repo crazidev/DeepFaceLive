@@ -209,6 +209,15 @@ class CameraSourceWorker(BackendWorker):
 
         cs.stream_protocol.enable()
         cs.stream_protocol.set_choices(_StreamProtocol, _StreamProtocol_names, none_choice_name=None)
+        # Non-empty DFL_STREAM_PROTOCOL overrides saved userdata (servers often set this per deploy).
+        raw_proto = os.environ.get('DFL_STREAM_PROTOCOL')
+        if raw_proto is not None and len(str(raw_proto).strip()) > 0 and state.source_type == _SourceType.NETWORK_STREAM:
+            pmap = {'udp': _StreamProtocol.UDP, 'srt': _StreamProtocol.SRT, 'rtmp': _StreamProtocol.RTMP, 'rtsp': _StreamProtocol.RTSP}
+            pu = pmap.get(str(raw_proto).strip().lower())
+            if pu is not None:
+                if state.stream_protocol != pu:
+                    print(f"\033[96mNetwork stream: DFL_STREAM_PROTOCOL={raw_proto.strip()!r} overrides saved protocol\033[0m")
+                state.stream_protocol = pu
         if state.stream_protocol is None:
             state.stream_protocol = self._stream_env.default_protocol
         cs.stream_protocol.select(state.stream_protocol)

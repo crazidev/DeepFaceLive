@@ -72,6 +72,7 @@ CAMERA_ARGS="$(camera_docker_args)"
 
 docker run --ipc=host --gpus all \
     -e "DISPLAY=$DFL_DISP" \
+    -e "DFL_OUTPUT_STREAM_UDP_PORT=${P_OUT}" \
     -e "DFL_STREAM_PORT_UDP=${P_IN}" \
     -p "${P_OUT}:${P_OUT}/udp" \
     -p "${P_IN}:${P_IN}/udp" \

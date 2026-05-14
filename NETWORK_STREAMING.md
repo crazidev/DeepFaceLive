@@ -6,7 +6,7 @@ This guide explains how to connect external video sources (like your smartphone 
 
 ## Environment variables (DeepFaceLive)
 
-When launching DeepFaceLive, you can set these variables so the **Network stream** tab builds listen and publisher URLs automatically (no manual URL pasting). Defaults match the quick reference table below.
+When launching DeepFaceLive, you can set these variables so the **Network stream** tab builds listen and publisher URLs automatically (no manual URL pasting). Defaults match the quick reference table below. If **`DFL_STREAM_PROTOCOL`** is set to a **non-empty** value, it **overrides** the protocol saved in userdata on each start (useful on servers); leave it **unset** or **empty** to keep the saved UI protocol.
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
@@ -16,7 +16,7 @@ When launching DeepFaceLive, you can set these variables so the **Network stream
 | `DFL_STREAM_PORT_SRT` | `8890` | SRT listen port (avoid `8888` if Jupyter or another service uses it, e.g. on RunPod). |
 | `DFL_STREAM_PORT_RTMP` | `1935` | RTMP listen port (path `/live/stream`). |
 | `DFL_STREAM_PORT_RTSP` | `8554` | RTSP listen port (path `/live`). |
-| `DFL_STREAM_PROTOCOL` | `udp` | Initial protocol in the UI: `udp`, `srt`, `rtmp`, or `rtsp` (case-insensitive). |
+| `DFL_STREAM_PROTOCOL` | *(unset)* | If **unset** or empty: keep saved protocol. If set to `udp`, `srt`, `rtmp`, or `rtsp`: **override** saved protocol on each start and rebuild the listen URL from `DFL_STREAM_PORT_*`. |
 
 **Example (macOS / Linux):**
 
