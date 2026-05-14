@@ -16,12 +16,18 @@ CUDA 11.8 runtime image with GPU PyTorch and **onnxruntime-gpu**. Build context 
 
 ## Stream output port (MPEG-TS / UDP)
 
-[`start.sh`](start.sh) publishes **one** UDP port so clients can receive **Stream output** MPEG-TS from the container. Default **1234**. Set the same port in the app’s Stream output settings.
+[`start.sh`](start.sh) publishes **two** UDP ports by default:
 
-Override before `start.sh`:
+| Env | Default | Role |
+| :--- | :--- | :--- |
+| `DFL_OUTPUT_STREAM_UDP_PORT` | `1234` | **Stream output** from the app (MPEG-TS push); match the Stream output panel. |
+| `DFL_STREAM_PORT_UDP` | `18766` | **Network stream** input (FFmpeg listens for OBS / Larix UDP); must differ from the output port. |
+
+They must not be the same port. Override either before `start.sh`:
 
 ```bash
-export DFL_OUTPUT_STREAM_UDP_PORT=2345
+export DFL_OUTPUT_STREAM_UDP_PORT=1234
+export DFL_STREAM_PORT_UDP=18766
 ./build/linux/start.sh -s
 ```
 
@@ -46,6 +52,10 @@ export DFL_ENABLE_CAMERA_DEVICES=1
 ```
 
 When enabled, existing `/dev/video0` … `/dev/video3` are passed through with `--device`.
+
+## Network stream (UDP / SRT) on RunPod
+
+If you see **`Address already in use`** on **SRT** (often port **8888**), Jupyter is usually using **8888** — use **`DFL_STREAM_PORT_SRT`** (default **8890** in the app). For **UDP**, the default listen port is **18766** (avoids collisions with common services and stuck `ffmpeg` retries). If a port is still busy, pick another with **`DFL_STREAM_PORT_UDP`**, run **`pkill -9 ffmpeg`**, and ensure **Stream output** and **Network stream** use **different** ports. See [`../../NETWORK_STREAMING.md`](../../NETWORK_STREAMING.md).
 
 ## Requirements
 

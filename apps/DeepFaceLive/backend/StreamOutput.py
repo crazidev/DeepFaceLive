@@ -1,3 +1,4 @@
+import os
 from enum import IntEnum
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -27,6 +28,17 @@ _InputRoute_names = {
     InputRoute.PIPELINE: '@StreamOutput.InputRoute.PIPELINE',
     InputRoute.SOURCE_DIRECT: '@StreamOutput.InputRoute.SOURCE_DIRECT',
 }
+
+
+def _default_output_stream_udp_port() -> int:
+    v = os.environ.get('DFL_OUTPUT_STREAM_UDP_PORT')
+    if v is None or len(str(v).strip()) == 0:
+        return 1234
+    try:
+        p = int(str(v).strip(), 10)
+        return p if 1 <= p <= 65535 else 1234
+    except ValueError:
+        return 1234
 
 
 class StreamOutput(BackendHost):
@@ -254,8 +266,10 @@ class StreamOutputWorker(BackendWorker):
         cs.stream_addr.set_text(state.stream_addr if state.stream_addr is not None else '127.0.0.1')
 
         cs.stream_port.enable()
-        cs.stream_port.set_config(lib_csw.Number.Config(min=1, max=9999, decimals=0, allow_instant_update=True))
-        cs.stream_port.set_number(state.stream_port if state.stream_port is not None else 1234)
+        cs.stream_port.set_config(lib_csw.Number.Config(min=1, max=65535, decimals=0, allow_instant_update=True))
+        cs.stream_port.set_number(
+            state.stream_port if state.stream_port is not None else _default_output_stream_udp_port()
+        )
 
         if self.bc_in_direct is not None and state.input_route == InputRoute.SOURCE_DIRECT:
             self._wait_direct_ack()

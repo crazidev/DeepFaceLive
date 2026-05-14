@@ -13,6 +13,7 @@ usage() {
     printf "  -d  Data dir (default: <repo>/data)\n"
     printf "GPU: requires NVIDIA Container Toolkit (--gpus all). Typical on RunPod.\n"
     printf "Stream output (MPEG-TS UDP): publish host port = container port (default 1234). Override with DFL_OUTPUT_STREAM_UDP_PORT.\n"
+    printf "Network stream (incoming UDP listen): publish port (default 18766). Override with DFL_STREAM_PORT_UDP. Must differ from DFL_OUTPUT_STREAM_UDP_PORT.\n"
     printf "Display: defaults to host \$DISPLAY. Override with DFL_CONTAINER_DISPLAY (e.g. :0 on a pod desktop).\n"
     printf "Cameras: off by default (RunPod). Set DFL_ENABLE_CAMERA_DEVICES=1 to pass /dev/video0..3 when present.\n"
 }
@@ -56,7 +57,13 @@ else
 fi
 
 P_OUT="${DFL_OUTPUT_STREAM_UDP_PORT:-1234}"
-printf '\nStream output (MPEG-TS / UDP): host port %s → container %s (match Stream output port in the app).\n\n' "$P_OUT" "$P_OUT"
+P_IN="${DFL_STREAM_PORT_UDP:-18766}"
+if [[ "$P_IN" == "$P_OUT" ]]; then
+    printf "Ports must differ: DFL_STREAM_PORT_UDP=%s and DFL_OUTPUT_STREAM_UDP_PORT=%s\n" "$P_IN" "$P_OUT" >&2
+    exit 1
+fi
+printf '\nStream output (MPEG-TS / UDP): host port %s → container %s (match Stream output in the app).\n' "$P_OUT" "$P_OUT"
+printf 'Network stream (UDP listen): host port %s → container %s (OBS / Larix → DeepFaceLive; match DFL_STREAM_PORT_UDP in the app).\n\n' "$P_IN" "$P_IN"
 
 DFL_DISP="${DFL_CONTAINER_DISPLAY:-${DISPLAY:-:0}}"
 printf "Using DISPLAY=%s (set DFL_CONTAINER_DISPLAY to override)\n" "$DFL_DISP"
@@ -65,7 +72,9 @@ CAMERA_ARGS="$(camera_docker_args)"
 
 docker run --ipc=host --gpus all \
     -e "DISPLAY=$DFL_DISP" \
+    -e "DFL_STREAM_PORT_UDP=${P_IN}" \
     -p "${P_OUT}:${P_OUT}/udp" \
+    -p "${P_IN}:${P_IN}/udp" \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -v "$DATA_FOLDER:/data/" \
     $CAMERA_ARGS \

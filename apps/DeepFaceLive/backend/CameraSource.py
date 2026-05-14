@@ -3,7 +3,6 @@ import platform
 import subprocess
 import threading
 import time
-import atexit
 from datetime import datetime
 from enum import IntEnum
 from typing import List, Tuple, Union
@@ -82,8 +81,10 @@ def read_stream_env() -> StreamEnv:
     ch = (os.environ.get('DFL_STREAM_CLIENT_HOST') or '').strip()
     client_host = ch if ch else None
     ports = {
-        _StreamProtocol.UDP: _parse_int_env('DFL_STREAM_PORT_UDP', 1238),
-        _StreamProtocol.SRT: _parse_int_env('DFL_STREAM_PORT_SRT', 8888),
+        # Default 18766: 1238/1234 often collide with other services or a second listener on RunPod.
+        _StreamProtocol.UDP: _parse_int_env('DFL_STREAM_PORT_UDP', 18766),
+        # Default 8890: 8888 often conflicts with Jupyter on RunPod / cloud notebooks.
+        _StreamProtocol.SRT: _parse_int_env('DFL_STREAM_PORT_SRT', 8890),
         _StreamProtocol.RTMP: _parse_int_env('DFL_STREAM_PORT_RTMP', 1935),
         _StreamProtocol.RTSP: _parse_int_env('DFL_STREAM_PORT_RTSP', 8554),
     }
@@ -181,6 +182,7 @@ class CameraSourceWorker(BackendWorker):
         self._stream_env = read_stream_env()
         self._stream_feed_connected_event = threading.Event()
         self._last_stream_wait_sent = None
+        self._ffmpeg_consecutive_listen_failures = 0
         lib_os.set_timer_resolution(4)
 
         state, cs = self.get_state(), self.get_control_sheet()
@@ -280,15 +282,21 @@ class CameraSourceWorker(BackendWorker):
                     print("\033[91mFailed to open camera\033[0m")
             else:
                 print(f"\033[94mOpening stream {state.stream_url}\033[0m")
-                vcap = cv2.VideoCapture(state.stream_url, cv2.CAP_FFMPEG)
-                if vcap.isOpened():
-                    print("\033[92mStream opened successfully\033[0m")
-                    self.vcap = vcap
+                vcap = None
+                # OpenCV + in-worker FFmpeg would both try to bind listener ports (SRT/RTMP/RTSP/UDP).
+                if self._is_network_listener_url(state.stream_url):
+                    print("\033[93mListener URL: skipping OpenCV; FFmpeg binds in the worker loop\033[0m")
                 else:
-                    print("\033[93mFailed to open stream (using FFmpeg for listener / push URLs)\033[0m")
+                    vcap = cv2.VideoCapture(state.stream_url, cv2.CAP_FFMPEG)
+                    if vcap.isOpened():
+                        print("\033[92mStream opened successfully\033[0m")
+                        self.vcap = vcap
+                    else:
+                        print("\033[93mFailed to open stream (using FFmpeg for listener / push URLs)\033[0m")
 
-            if vcap.isOpened() or (state.source_type == _SourceType.NETWORK_STREAM and state.stream_url):
-                if state.source_type == _SourceType.NETWORK_STREAM and not vcap.isOpened():
+            network_has_url = state.source_type == _SourceType.NETWORK_STREAM and state.stream_url
+            if (vcap is not None and vcap.isOpened()) or network_has_url:
+                if state.source_type == _SourceType.NETWORK_STREAM and vcap is not None and not vcap.isOpened():
                     vcap.release()
                 cs.fps.enable()
                 cs.fps.set_config(lib_csw.Number.Config(min=0, max=240, step=1.0, decimals=2, zero_is_auto=True, allow_instant_update=False))
@@ -473,11 +481,17 @@ class CameraSourceWorker(BackendWorker):
 
     def _ffmpeg_reader(self, url):
         self.ffmpeg_starting = True
+        stream_connected = False
         try:
-            if url.startswith('udp://') and 'reuse=1' not in url:
-                if '?' in url: url += '&reuse=1'
-                else: url += '?reuse=1'
-            
+            if url.startswith('udp://'):
+                extra = []
+                if 'reuse=1' not in url:
+                    extra.append('reuse=1')
+                if 'overrun_nonfatal=1' not in url:
+                    extra.append('overrun_nonfatal=1')
+                if extra:
+                    url += ('&' if '?' in url else '?') + '&'.join(extra)
+
             is_file = os.path.exists(url)
             is_listener = 'listen=1' in url or 'mode=listener' in url or url.startswith('udp://')
 
@@ -521,18 +535,9 @@ class CameraSourceWorker(BackendWorker):
             w, h = 1280, 720
             
             self.ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=w*h*3*10)
-            
-            def cleanup_ffmpeg(proc):
-                if proc and proc.poll() is None:
-                    try:
-                        proc.kill()
-                    except:
-                        pass
-            atexit.register(cleanup_ffmpeg, self.ffmpeg_proc)
 
             self.ffmpeg_starting = False
             frame_size = w * h * 3
-            stream_connected = False
             while self.ffmpeg_proc is not None:
                 raw_frame = self.ffmpeg_proc.stdout.read(frame_size)
                 if len(raw_frame) != frame_size:
@@ -549,6 +554,11 @@ class CameraSourceWorker(BackendWorker):
             if self.ffmpeg_proc:
                 self.ffmpeg_proc.terminate()
                 self.ffmpeg_proc = None
+            if stream_connected:
+                self._ffmpeg_consecutive_listen_failures = 0
+            else:
+                self._ffmpeg_consecutive_listen_failures = min(
+                    self._ffmpeg_consecutive_listen_failures + 1, 10)
             print(f"\033[91m[X] FFmpeg reader stopped/disconnected: {url}\033[0m")
 
     def stop_ffmpeg(self):
@@ -561,14 +571,16 @@ class CameraSourceWorker(BackendWorker):
             except subprocess.TimeoutExpired:
                 self.ffmpeg_proc.kill()
             self.ffmpeg_proc = None
-        if self.ffmpeg_thread:
-            # We don't join because it might block, let it die as daemon
-            self.ffmpeg_thread = None
+        thr = self.ffmpeg_thread
+        self.ffmpeg_thread = None
+        if thr is not None and thr.is_alive():
+            thr.join(timeout=2.0)
         self.last_frame = None
         cs = self.get_control_sheet()
         if cs.stream_waiting.is_enabled():
             cs.stream_waiting.set_flag(False)
         self._last_stream_wait_sent = None
+        self._ffmpeg_consecutive_listen_failures = 0
 
     def on_stop(self):
         self.stop_ffmpeg()
@@ -591,7 +603,11 @@ class CameraSourceWorker(BackendWorker):
             if self.ffmpeg_proc is None and not self.ffmpeg_starting:
                 if state.stream_url:
                     now = time.time()
-                    if now - self.last_ffmpeg_start_time > 5.0: # Retry delay
+                    backoff = min(
+                        60.0,
+                        5.0 * (2 ** min(self._ffmpeg_consecutive_listen_failures, 4)),
+                    )
+                    if now - self.last_ffmpeg_start_time > backoff:
                         self.last_ffmpeg_start_time = now
                         self._stream_feed_connected_event.clear()
                         self.ffmpeg_thread = threading.Thread(target=self._ffmpeg_reader, args=(state.stream_url,), daemon=True)
