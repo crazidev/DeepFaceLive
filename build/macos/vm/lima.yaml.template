@@ -45,6 +45,10 @@ portForwards:
   - guestPort: 8554
     hostIP: "0.0.0.0"
     proto: "tcp"
+  # WebRTC signaling server (HTTPS)
+  - guestPort: 9090
+    hostIP: "0.0.0.0"
+    proto: "tcp"
   # Provisioning script to install all operating system packages required by PyQt6 and DeepFaceLive
 provision:
   - mode: system
