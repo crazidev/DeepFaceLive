@@ -95,7 +95,7 @@ async function startPreview() {
   }
 
   const res = getPresetConstraints();
-  
+
   // Attempt 1: Optimal presets
   const optimalConstraints = {
     video: {
@@ -112,7 +112,7 @@ async function startPreview() {
     console.log("Successfully acquired camera with optimal presets:", res);
   } catch (err) {
     console.warn("Optimal constraints failed, trying safe mobile compatibility fallback...", err);
-    
+
     // Attempt 2: iPhone/mobile fallback (remove exact framerate and ideal dimension bounds)
     const fallbackConstraints = {
       video: {
@@ -120,7 +120,7 @@ async function startPreview() {
       },
       audio: false
     };
-    
+
     try {
       localStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
       console.log("Successfully acquired camera with fallback constraints.");
@@ -136,14 +136,14 @@ async function startPreview() {
   videoEl.srcObject = localStream;
   placeholder.style.display = 'none';
   setStatus('', 'Preview Active');
-  
+
   // Explicitly trigger play to prevent Safari pausing playback
   try {
     await videoEl.play();
   } catch (playErr) {
     console.warn("Autoplay blocked, waiting for user gesture:", playErr);
   }
-  
+
   // Dynamically apply settings to active sender if already streaming
   if (running && pc) {
     // Re-configure active sender with new resolution by replacing track
@@ -200,7 +200,10 @@ async function enumerateDevices() {
 async function applySenderParameters(presetName) {
   if (!pc) return;
   const preset = PRESETS[presetName] || PRESETS['balanced'];
-  const targetBitrate = Math.round(preset.bitrate * adaptiveBitrateAdjustment);
+
+  // Enforce a strict minimum bitrate floor to maintain clear face swap visual details
+  const minBitrateFloor = preset.width === 640 ? 300000 : (preset.width === 1280 ? 600000 : 1200000);
+  const targetBitrate = Math.max(minBitrateFloor, Math.round(preset.bitrate * adaptiveBitrateAdjustment));
 
   const senders = pc.getSenders();
   for (const sender of senders) {
@@ -332,15 +335,20 @@ function startStatsMonitoring() {
       lastPacketsLost = packetsLost;
       lastStatsTime = now;
 
+      // Normalize RTT: WebKit/Safari can report RTT in ms instead of seconds
+      let rttMs = rtt;
+      if (rtt > 0 && rtt < 10) {
+        rttMs = rtt * 1000;
+      }
+
       // Update UI elements
       document.getElementById('metric-res').textContent = width ? `${width}x${height}` : '720p';
       document.getElementById('metric-fps').textContent = Math.round(fps) || '0';
       document.getElementById('metric-bitrate').textContent = `${bitrateKbps} Kbps`;
-      document.getElementById('metric-rtt').textContent = `${Math.round(rtt * 1000)}ms`;
+      document.getElementById('metric-rtt').textContent = `${Math.round(rttMs)}ms`;
       document.getElementById('metric-loss').textContent = `${lossRate.toFixed(1)}%`;
 
-      // Adaptation Logic
-      const rttMs = rtt * 1000;
+      // Adaptation Logic (Loosened thresholds for robust local network / Wi-Fi streaming stability)
       let needsAdaptation = false;
 
       if (rttMs > 250 || lossRate > 5.0) {
@@ -349,13 +357,13 @@ function startStatsMonitoring() {
           needsAdaptation = true;
           console.warn(`Severe congestion. Adapting bitrate factor to 50%.`);
         }
-      } else if (rttMs > 150 || lossRate > 2.0) {
+      } else if (rttMs > 250 || lossRate > 4.0) {
         if (adaptiveBitrateAdjustment > 0.75) {
           adaptiveBitrateAdjustment = 0.75;
           needsAdaptation = true;
           console.warn(`Moderate congestion. Adapting bitrate factor to 75%.`);
         }
-      } else if (rttMs < 80 && lossRate < 1.0) {
+      } else if (rttMs < 180 && lossRate < 1.5) {
         if (adaptiveBitrateAdjustment < 1.0) {
           adaptiveBitrateAdjustment = Math.min(1.0, adaptiveBitrateAdjustment + 0.1);
           needsAdaptation = true;
@@ -389,11 +397,11 @@ function translateSDPCandidates(sdp) {
     const ipRegex = /(a=candidate:\S+ \d+ \S+ \d+ )(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g;
     return sdp.replace(ipRegex, (match, prefix, ip) => {
       const parts = ip.split('.').map(Number);
-      const isPrivate = 
-        (parts[0] === 10) || 
-        (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || 
+      const isPrivate =
+        (parts[0] === 10) ||
+        (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
         (parts[0] === 192 && parts[1] === 168);
-        
+
       if (isPrivate) {
         console.log(`SDP Translation: mapping local VM IP ${ip} to reachable host IP ${reachableHost}`);
         return prefix + reachableHost;
@@ -428,7 +436,7 @@ async function startStreaming() {
     });
 
     localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    
+
     // Apply low-latency codec preferences first
     applyCodecPreferences();
 
@@ -472,10 +480,10 @@ async function startStreaming() {
 
     if (!resp.ok) throw new Error(`Server responded ${resp.status}`);
     const answer = await resp.json();
-    
+
     // Dynamically translate SDP host candidates to bridge local virtualization routes
     answer.sdp = translateSDPCandidates(answer.sdp);
-    
+
     await pc.setRemoteDescription(answer);
 
     // Apply high-performance streaming parameters via RTCRtpSender
@@ -566,12 +574,12 @@ async function reconnect() {
       });
       if (!resp.ok) throw new Error(`Server ${resp.status}`);
       const answer = await resp.json();
-      
+
       // Dynamically translate SDP host candidates to bridge local virtualization routes
       answer.sdp = translateSDPCandidates(answer.sdp);
-      
+
       await pc.setRemoteDescription(answer);
-      
+
       await applySenderParameters(presetSel.value);
     } catch (err) {
       console.error('Reconnect failed:', err);
