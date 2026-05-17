@@ -89,6 +89,13 @@ async function startPreview() {
   const deviceId = cameraSelect.value;
   if (!deviceId) return;
 
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const warningEl = document.getElementById('secure-warning');
+    if (warningEl) warningEl.style.display = 'flex';
+    setStatus('error', 'Camera access blocked (HTTPS Required)');
+    return;
+  }
+
   const res = parseResolution();
   try {
     // Ideal settings for high definition (HD) camera streaming
@@ -114,6 +121,14 @@ async function startPreview() {
 
 // ── Enumerate cameras ────────────────────────────────────────────────
 async function enumerateDevices() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const warningEl = document.getElementById('secure-warning');
+    if (warningEl) warningEl.style.display = 'flex';
+    cameraSelect.innerHTML = '<option value="">HTTPS required</option>';
+    setStatus('error', 'Camera access blocked (HTTPS Required)');
+    return;
+  }
+
   try {
     // Need a temporary stream to get labelled device list in most browsers
     const tmpStream = await navigator.mediaDevices.getUserMedia({ video: true });

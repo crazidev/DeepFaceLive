@@ -255,3 +255,35 @@ select option { background: #1a1a2e; color: var(--text-primary); }
   .control-row { flex-direction: column; align-items: stretch; gap: 6px; }
   .control-row label { flex: none; }
 }
+
+/* ─── Secure Context Warning ─────────────────────────────────────────── */
+.secure-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgba(255, 79, 109, 0.08);
+  border: 1px solid var(--danger-glow);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #ff9fb0;
+  animation: fadeSlideDown 0.4s ease-out;
+}
+.secure-warning svg {
+  width: 20px;
+  height: 20px;
+  color: var(--danger);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.secure-warning h3 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+  color: var(--text-primary);
+}
+.secure-warning p strong {
+  color: var(--warning);
+}

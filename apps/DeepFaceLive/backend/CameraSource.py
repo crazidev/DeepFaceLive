@@ -813,7 +813,7 @@ class CameraSourceWorker(BackendWorker):
         if not public_url:
             public_host = os.environ.get('DFL_TURN_PUBLIC_HOST')
             if public_host:
-                public_url = f'https://{public_host}' if port in (443, 80) else f'http://{public_host}:{port}'
+                public_url = f'https://{public_host}' if port in (443, 80) else f'https://{public_host}:{port}'
         
         if not public_url:
             import socket
@@ -824,7 +824,7 @@ class CameraSourceWorker(BackendWorker):
                 s.close()
             except Exception:
                 local_ip = "localhost"
-            public_url = f'http://{local_ip}:{port}'
+            public_url = f'https://{local_ip}:{port}'
 
         cs.webrtc_url.set_text(public_url)
         cs.webrtc_waiting.set_flag(True)
