@@ -98,9 +98,72 @@ For **inbound** network camera URLs into DeepFaceLive inside Docker, continue to
 
 ---
 
+## WebRTC (Browser Camera)
+
+Stream your **browser camera** directly to DeepFaceLive — no OBS, no mobile app, just open a URL. Uses WebRTC for ultra-low latency, peer-to-peer video.
+
+### How It Works
+
+```
+Browser (getUserMedia) ──WebRTC──▶ Python signaling server ──shared memory──▶ CameraSource (DeepFaceLive)
+```
+
+The WebRTC server is a lightweight Python process (`aiortc` + `aiohttp`) that:
+1. Serves a camera-capture web app at `http://localhost:9090`
+2. Handles WebRTC SDP signaling via `POST /offer`
+3. Decodes incoming video frames and passes them to DeepFaceLive through zero-copy shared memory
+
+### Environment Variable
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `DFL_WEBRTC_PORT` | `9090` | HTTP port for WebRTC signaling server and browser webapp. |
+
+### Setup Steps
+
+**1. In DeepFaceLive:**
+1. Open the **Camera source** module.
+2. Click the **WebRTC** tab.
+3. Click **Start**. The webapp URL will appear (e.g. `http://localhost:9090`).
+
+**2. In your browser (same machine or LAN):**
+1. Open the URL shown in the WebRTC tab.
+2. Grant camera access when prompted.
+3. Select your camera and resolution.
+4. Click **Start Streaming**.
+
+Frames will appear in DeepFaceLive within milliseconds.
+
+### LAN Access
+
+To stream from a **different device** on your network (e.g. phone browser), open `http://<YOUR_PC_IP>:9090` instead of `localhost`. Make sure port 9090 (or your custom `DFL_WEBRTC_PORT`) is allowed through your firewall.
+
+### Docker
+
+If running in Docker, publish the WebRTC port:
+
+```bash
+docker run -p 9090:9090 ... your-image ...
+```
+
+Or use `--network host` on Linux.
+
+### Requirements
+
+The WebRTC server requires the `aiortc` Python package:
+
+```bash
+pip install aiortc aiohttp
+```
+
+---
+
 ## Troubleshooting
 
 *   **UDP / SRT `Address already in use`:** Another process (or a previous stuck `ffmpeg`) is bound to that port. Pick a free port with `DFL_STREAM_PORT_UDP` / `DFL_STREAM_PORT_SRT`, run `pkill -9 ffmpeg` if needed, and avoid overlapping **Stream output** vs **Network stream** ports. On RunPod, **8888** is often Jupyter (use SRT default **8890**).
 *   **"Address already in use" Error (UDP):** This means a previous FFmpeg process didn't close properly. You can fix this by running `pkill -9 ffmpeg` in your terminal to clear stuck ports.
 *   **SRT "Protocol not found":** Ensure you have the full version of FFmpeg installed. On Mac, use Homebrew: `brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-srt --with-openssl`.
 *   **Connection Refused:** Ensure your Mac's firewall is not blocking incoming connections for Python or FFmpeg on the specified port.
+*   **WebRTC "Failed to connect":** Make sure `aiortc` and `aiohttp` are installed (`pip install aiortc aiohttp`). Check that port 9090 (or `DFL_WEBRTC_PORT`) is not in use by another process.
+*   **WebRTC no video in browser:** Ensure you're using HTTPS or `localhost` (browsers require a secure context for `getUserMedia`). On LAN, Chrome allows HTTP on `localhost` only; for other IPs you may need to use a self-signed cert or a browser flag.
+

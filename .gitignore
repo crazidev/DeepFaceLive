@@ -1,7 +1,104 @@
-*
-!*.py
-!*.md
-!*.txt
-!*.jpg
-!*.png
-!requirements*
+# ==============================================================================
+# DeepFaceLive - Git Ignore Configuration
+# Professional, robust, and clean configuration for cross-platform development
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Operating System Metadata & System Files
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ------------------------------------------------------------------------------
+# 2. Python - Compiled Bytecode & Caches
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ------------------------------------------------------------------------------
+# 3. Environments, Dependencies & Secrets
+# ------------------------------------------------------------------------------
+# Local environment configs (contains API keys, stream URLs, tokens, etc.)
+.env
+.env.*
+!.env.example
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+lib/
+lib64/
+bin/
+include/
+share/
+pyvenv.cfg
+pip-selfcheck.json
+
+# ------------------------------------------------------------------------------
+# 4. Editors, IDEs & Development Tools
+# ------------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+
+# ------------------------------------------------------------------------------
+# 5. DeepFaceLive & Machine Learning Specifics
+# ------------------------------------------------------------------------------
+# Runtime / User data directories (stores datasets, local videos, sessions)
+data/
+
+# Heavy local model weight files (downloaded at runtime; prevents bloating repository)
+# Split model files (.part*) are already tracked in git and will remain tracked.
+*.onnx
+*.pth
+*.dfm
+*.pb
+*.h5
+*.t7
+*.pt
+*.weights
+*.bin
+!*.part*
+
+# Large temporary files / logs
+*.log
+*.tmp
+*.temp
+
+# ------------------------------------------------------------------------------
+# 6. Build Caches & Packaging Outputs
+# ------------------------------------------------------------------------------
+# (NOTE: Source folders like 'build/linux/' and 'build/macos/' contain scripts
+# and configuration files that are tracked, so the build/ folder is NOT ignored.
+# Only standard packaging/compilation build artifacts are listed here.)
+dist/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+var/
+sdist/
+develop-eggs/
+downloads/
+parts/
+.installed.cfg

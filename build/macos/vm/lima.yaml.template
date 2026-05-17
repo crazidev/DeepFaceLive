@@ -1,0 +1,77 @@
+# Lima VM configuration for DeepFaceLive
+# Automatically generated from template during startup
+
+# OS Image: Ubuntu 22.04 LTS (Jammy Jellyfish)
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+# Resource allocation (customizable for fast rendering/performance)
+cpus: 4
+memory: "6GiB"
+disk: "50GiB"
+
+# Directory mounts between macOS and the Linux VM
+mounts:
+  # Mount home directory so data folders under home are accessible at the identical path
+  - location: "~"
+    writable: true
+  # Mount the DeepFaceLive repository root to a predictable guest path
+  - location: "REPO_ROOT_PLACEHOLDER"
+    mountPoint: "/work/DeepFaceLive"
+    writable: true
+
+# Port-forwarding configuration (exposes all ports to 0.0.0.0 for network testing/OBS/phones)
+portForwards:
+  # Stream output (MPEG-TS push)
+  - guestPort: 1234
+    hostIP: "0.0.0.0"
+    proto: "udp"
+  # Network stream incoming (UDP listen)
+  - guestPort: 18766
+    hostIP: "0.0.0.0"
+    proto: "udp"
+  # SRT listen port
+  - guestPort: 8890
+    hostIP: "0.0.0.0"
+    proto: "udp"
+  # RTMP listen port
+  - guestPort: 1935
+    hostIP: "0.0.0.0"
+    proto: "tcp"
+  # RTSP listen port
+  - guestPort: 8554
+    hostIP: "0.0.0.0"
+    proto: "tcp"
+  # Provisioning script to install all operating system packages required by PyQt6 and DeepFaceLive
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      
+      echo "=== System provisioning: updating packages ==="
+      apt-get update
+      
+      echo "=== System provisioning: installing system dependencies ==="
+      apt-get install -y --no-install-recommends \
+          libgl1 libegl1 libxrandr2 libxss1 libxcursor1 libxcomposite1 \
+          libasound2 libxi6 libxtst6 curl ffmpeg git nano gnupg2 libsm6 wget unzip \
+          libxcb-icccm4 libxkbcommon-x11-0 libxcb-keysyms1 libxcb-render0 \
+          libxcb-render-util0 libxcb-image0 libxcb-cursor0 \
+          libxcb-xinerama0 libxcb-xinput0 libxcb-xfixes0 libxcb-shape0 \
+          libxcb-shm0 libxcb-sync1 libxcb-xkb1 libxcb-util1 \
+          python3 python3-pip python3-venv python3-dev build-essential \
+          libxft2 libxinerama1 libxmu6 libxpm4 \
+          ocl-icd-libopencl1 pocl-opencl-icd
+
+      
+      # Set up python symlink so running 'python' works identically to 'python3'
+      if [ ! -f /usr/bin/python ]; then
+          ln -sf /usr/bin/python3 /usr/bin/python
+      fi
+      
+      echo "=== System provisioning: complete ==="

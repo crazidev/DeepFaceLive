@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Stream your browser camera to DeepFaceLive via WebRTC" />
+  <title>DeepFaceLive — WebRTC Camera</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <header class="app-header">
+    <h1>DeepFaceLive WebRTC</h1>
+    <p>Stream your camera to DeepFaceLive in real-time</p>
+  </header>
+
+  <main class="card" id="main-card">
+    <!-- Video Preview -->
+    <div class="video-container" id="video-container">
+      <video id="preview" autoplay playsinline muted></video>
+      <div class="video-placeholder" id="placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 7l-7 5 7 5V7z"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+        <span>Select a camera and press Start</span>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar" id="status-bar">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Ready</span>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <div class="control-row">
+        <label for="camera-select">Camera</label>
+        <select id="camera-select">
+          <option value="">Loading devices…</option>
+        </select>
+      </div>
+
+      <div class="control-row">
+        <label for="resolution-select">Quality</label>
+        <select id="resolution-select">
+          <option value="640x480">480p (640 × 480)</option>
+          <option value="1280x720" selected>720p (1280 × 720)</option>
+          <option value="1920x1080">1080p (1920 × 1080)</option>
+        </select>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-start" id="btn-start">Start Streaming</button>
+        <button class="btn btn-stop" id="btn-stop" disabled>Stop</button>
+      </div>
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    DeepFaceLive · WebRTC Camera Streamer
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

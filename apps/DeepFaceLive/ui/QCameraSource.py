@@ -86,22 +86,54 @@ class QCameraSource(QBackendPanel):
         network_page = qtx.QWidget()
         network_page.setLayout(network_grid)
 
+        # ── WebRTC tab ──
+        q_webrtc_url_label = QLabelPopupInfo(label=L('@QCameraSource.webrtc_url'), popup_info_text=L('@QCameraSource.help.webrtc_url') )
+        q_webrtc_url       = QLineEditCSWText(cs.webrtc_url, read_only=True, reflect_state_widgets=[q_webrtc_url_label])
+
+        q_webrtc_wait_pb = qtx.QXProgressBar(min=0, max=0, fixed_width=120, fixed_height=14)
+        q_webrtc_wait_pb.setTextVisible(False)
+        q_webrtc_wait_msg = qtx.QXLabel(text=L('@QCameraSource.waiting_for_browser'))
+        q_webrtc_waiting_row = qtx.QXWidgetHBox([q_webrtc_wait_pb, q_webrtc_wait_msg], spacing=8)
+        q_webrtc_waiting_row.hide()
+
+        def on_webrtc_waiting(flag : bool):
+            q_webrtc_waiting_row.setVisible(bool(flag))
+
+        cs.webrtc_waiting.call_on_flag(on_webrtc_waiting)
+
+        webrtc_grid = qtx.QXGridLayout(spacing=5)
+        wrow = 0
+        webrtc_grid.addWidget(q_webrtc_url_label, wrow, 0, alignment=qtx.AlignRight | qtx.AlignVCenter)
+        webrtc_grid.addWidget(q_webrtc_url, wrow, 1, alignment=qtx.AlignLeft)
+        wrow += 1
+        webrtc_grid.addWidget(q_webrtc_waiting_row, wrow, 0, 1, 2, alignment=qtx.AlignLeft)
+
+        webrtc_page = qtx.QWidget()
+        webrtc_page.setLayout(webrtc_grid)
+
         q_tabs = qtx.QTabWidget()
         q_tabs.addTab(camera_page, L('@QCameraSource.tab_camera'))
         q_tabs.addTab(network_page, L('@QCameraSource.tab_network'))
+        q_tabs.addTab(webrtc_page, L('@QCameraSource.tab_webrtc'))
+
+        _source_to_tab = {
+            CameraSource.SOURCE_TYPE_CAMERA:  0,
+            CameraSource.SOURCE_TYPE_NETWORK: 1,
+            CameraSource.SOURCE_TYPE_WEBRTC:  2,
+        }
+        _tab_to_source = {v: k for k, v in _source_to_tab.items()}
 
         def sync_tab_from_source(_idx, choice):
-            tab_i = 0 if choice == CameraSource.SOURCE_TYPE_CAMERA else 1
+            tab_i = _source_to_tab.get(choice, 0)
             with qtx.BlockSignals(q_tabs):
                 q_tabs.setCurrentIndex(tab_i)
 
         cs.source_type.call_on_selected(sync_tab_from_source)
 
         def on_tab_changed(i : int):
-            if i == 0:
-                cs.source_type.select(CameraSource.SOURCE_TYPE_CAMERA)
-            else:
-                cs.source_type.select(CameraSource.SOURCE_TYPE_NETWORK)
+            src = _tab_to_source.get(i)
+            if src is not None:
+                cs.source_type.select(src)
 
         q_tabs.currentChanged.connect(on_tab_changed)
 
@@ -135,3 +167,4 @@ class QCameraSource(QBackendPanel):
         super().__init__(backend, L('@QCameraSource.module_title'),
                          layout=main_l,
                          content_align_top=True)
+

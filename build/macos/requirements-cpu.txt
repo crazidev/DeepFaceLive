@@ -1,0 +1,21 @@
+# CPU-only PyTorch
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+onnxruntime==1.15.1
+numpy==1.21.6
+h5py
+numexpr
+protobuf==3.20.2
+opencv-python==4.8.0.74
+opencv-contrib-python==4.8.0.74
+pyqt6==6.5.1
+onnx==1.14.0
+torch==1.13.1+cpu
+torchvision==0.14.1+cpu
+
+-r ../../services/stream_ingest/requirements.txt
+aiortc
+aiohttp
+
+
+

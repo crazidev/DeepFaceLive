@@ -1,0 +1,17 @@
+# PyTorch CUDA 11.7 wheels (compatible with CUDA 11.8 runtime images / RunPod)
+--extra-index-url https://download.pytorch.org/whl/cu117
+
+onnxruntime-gpu==1.15.1
+numpy==1.21.6
+h5py
+numexpr
+protobuf==3.20.2
+opencv-python==4.8.0.74
+opencv-contrib-python==4.8.0.74
+pyqt6==6.5.1
+onnx==1.14.0
+torch==1.13.1+cu117
+torchvision==0.14.1+cu117
+aiortc
+aiohttp
+

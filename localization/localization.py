@@ -554,6 +554,42 @@ class Localization:
                 'ja-JP' : 'RTSP（リスナー）',
                 'de-DE' : 'RTSP (Listener)'},
 
+    'QCameraSource.tab_webrtc':{
+                'en-US' : 'WebRTC',
+                'ru-RU' : 'WebRTC',
+                'zh-CN' : 'WebRTC',
+                'es-ES' : 'WebRTC',
+                'it-IT' : 'WebRTC',
+                'ja-JP' : 'WebRTC',
+                'de-DE' : 'WebRTC'},
+
+    'QCameraSource.webrtc_url':{
+                'en-US' : 'Webapp URL',
+                'ru-RU' : 'URL веб-приложения',
+                'zh-CN' : '网页应用 URL',
+                'es-ES' : 'URL de la webapp',
+                'it-IT' : 'URL webapp',
+                'ja-JP' : 'WebアプリURL',
+                'de-DE' : 'Webapp-URL'},
+
+    'QCameraSource.help.webrtc_url':{
+                'en-US' : 'Open this URL in your browser to stream your camera to DeepFaceLive via WebRTC.',
+                'ru-RU' : 'Откройте этот URL в браузере, чтобы транслировать камеру в DeepFaceLive через WebRTC.',
+                'zh-CN' : '在浏览器中打开此 URL，通过 WebRTC 将摄像头流式传输到 DeepFaceLive。',
+                'es-ES' : 'Abra esta URL en su navegador para transmitir su cámara a DeepFaceLive vía WebRTC.',
+                'it-IT' : 'Apri questo URL nel browser per trasmettere la telecamera a DeepFaceLive tramite WebRTC.',
+                'ja-JP' : 'このURLをブラウザで開き、WebRTC経由でカメラをDeepFaceLiveにストリーミングします。',
+                'de-DE' : 'Öffnen Sie diese URL im Browser, um Ihre Kamera per WebRTC an DeepFaceLive zu streamen.'},
+
+    'QCameraSource.waiting_for_browser':{
+                'en-US' : 'Waiting for browser connection…',
+                'ru-RU' : 'Ожидание подключения браузера…',
+                'zh-CN' : '等待浏览器连接…',
+                'es-ES' : 'Esperando conexión del navegador…',
+                'it-IT' : 'In attesa della connessione del browser…',
+                'ja-JP' : 'ブラウザの接続を待機中…',
+                'de-DE' : 'Warte auf Browser-Verbindung…'},
+
     'QFaceDetector.module_title':{
                 'en-US' : 'Face detector',
                 'ru-RU' : 'Детектор лиц',

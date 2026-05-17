@@ -1,10 +1,13 @@
+import multiprocessing
 import os
 import platform
+import struct
 import subprocess
 import threading
 import time
 from datetime import datetime
 from enum import IntEnum
+from multiprocessing import shared_memory
 from typing import List, Tuple, Union
 
 import cv2
@@ -21,15 +24,18 @@ from .BackendBase import (BackendConnection, BackendConnectionData, BackendDB,
 class _SourceType(IntEnum):
     CAMERA_DEVICE = 0
     NETWORK_STREAM = 1
+    WEBRTC_STREAM = 2
 
 _SourceType_names = { _SourceType.CAMERA_DEVICE : 'Camera device',
                       _SourceType.NETWORK_STREAM : 'Network stream',
+                      _SourceType.WEBRTC_STREAM : 'WebRTC (Browser)',
                     }
 
 
 class CameraSource(BackendHost):
     SOURCE_TYPE_CAMERA = _SourceType.CAMERA_DEVICE
     SOURCE_TYPE_NETWORK = _SourceType.NETWORK_STREAM
+    SOURCE_TYPE_WEBRTC = _SourceType.WEBRTC_STREAM
 
     def __init__(self, weak_heap :  BackendWeakHeap, bc_out : BackendConnection, backend_db : BackendDB = None):
         super().__init__(backend_db=backend_db,
@@ -183,7 +189,14 @@ class CameraSourceWorker(BackendWorker):
         self._stream_feed_connected_event = threading.Event()
         self._last_stream_wait_sent = None
         self._ffmpeg_consecutive_listen_failures = 0
+        # WebRTC state
+        self._webrtc_shm = None
+        self._webrtc_proc = None
+        self._webrtc_stop_event = None
+        self._webrtc_last_seq = 0
+        self._webrtc_port = _parse_int_env('DFL_WEBRTC_PORT', 9090)
         lib_os.set_timer_resolution(4)
+        self.start_profile_timing()
 
         state, cs = self.get_state(), self.get_control_sheet()
 
@@ -225,12 +238,27 @@ class CameraSourceWorker(BackendWorker):
         cs.stream_waiting.enable()
         cs.stream_waiting.set_flag(False)
 
+        # WebRTC widgets
+        cs.webrtc_url.enable()
+        cs.webrtc_url.set_text('')
+        cs.webrtc_waiting.enable()
+        cs.webrtc_waiting.set_flag(False)
+
         if state.source_type == _SourceType.NETWORK_STREAM:
             self._apply_network_stream_from_state()
+            cs.webrtc_url.disable()
+            cs.webrtc_waiting.disable()
+        elif state.source_type == _SourceType.WEBRTC_STREAM:
+            cs.stream_protocol.disable()
+            cs.stream_client_hint.disable()
+            cs.stream_waiting.disable()
+            self._start_webrtc_server()
         else:
             cs.stream_protocol.disable()
             cs.stream_client_hint.disable()
             cs.stream_waiting.disable()
+            cs.webrtc_url.disable()
+            cs.webrtc_waiting.disable()
 
         if state.source_type == _SourceType.CAMERA_DEVICE:
             cs.driver.enable()
@@ -268,7 +296,8 @@ class CameraSourceWorker(BackendWorker):
             cs.resolution.disable()
 
         if (state.source_type == _SourceType.CAMERA_DEVICE and state.device_idx is not None and state.driver is not None) or \
-           (state.source_type == _SourceType.NETWORK_STREAM and state.stream_url is not None and len(state.stream_url) != 0):
+           (state.source_type == _SourceType.NETWORK_STREAM and state.stream_url is not None and len(state.stream_url) != 0) or \
+           (state.source_type == _SourceType.WEBRTC_STREAM):
 
             if state.source_type == _SourceType.CAMERA_DEVICE:
                 cv_api = {_DriverType.COMPATIBLE: cv2.CAP_ANY,
@@ -289,7 +318,7 @@ class CameraSourceWorker(BackendWorker):
                     vcap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
                 else:
                     print("\033[91mFailed to open camera\033[0m")
-            else:
+            elif state.source_type == _SourceType.NETWORK_STREAM:
                 print(f"\033[94mOpening stream {state.stream_url}\033[0m")
                 vcap = None
                 # OpenCV + in-worker FFmpeg would both try to bind listener ports (SRT/RTMP/RTSP/UDP).
@@ -302,9 +331,14 @@ class CameraSourceWorker(BackendWorker):
                         self.vcap = vcap
                     else:
                         print("\033[93mFailed to open stream (using FFmpeg for listener / push URLs)\033[0m")
+            else:
+                # WEBRTC_STREAM — no vcap needed; frames come via shared memory
+                vcap = None
+                print(f"\033[94mWebRTC stream mode — waiting for browser on port {self._webrtc_port}\033[0m")
 
             network_has_url = state.source_type == _SourceType.NETWORK_STREAM and state.stream_url
-            if (vcap is not None and vcap.isOpened()) or network_has_url:
+            is_webrtc = state.source_type == _SourceType.WEBRTC_STREAM
+            if (vcap is not None and vcap.isOpened()) or network_has_url or is_webrtc:
                 if state.source_type == _SourceType.NETWORK_STREAM and vcap is not None and not vcap.isOpened():
                     vcap.release()
                 cs.fps.enable()
@@ -391,15 +425,30 @@ class CameraSourceWorker(BackendWorker):
                 cs.stream_protocol.enable()
                 cs.stream_waiting.enable()
                 self._apply_network_stream_from_state()
+                cs.webrtc_url.disable()
+                cs.webrtc_waiting.disable()
+                cs.webrtc_waiting.set_flag(False)
+            elif source_type == _SourceType.WEBRTC_STREAM:
+                cs.stream_protocol.disable()
+                cs.stream_client_hint.disable()
+                cs.stream_waiting.disable()
+                cs.stream_waiting.set_flag(False)
+                self._last_stream_wait_sent = None
+                cs.webrtc_url.enable()
+                cs.webrtc_waiting.enable()
             else:
                 cs.stream_protocol.disable()
                 cs.stream_client_hint.disable()
                 cs.stream_waiting.disable()
                 cs.stream_waiting.set_flag(False)
                 self._last_stream_wait_sent = None
+                cs.webrtc_url.disable()
+                cs.webrtc_waiting.disable()
+                cs.webrtc_waiting.set_flag(False)
             self.save_state()
             if self.is_started():
                 self.stop_ffmpeg()
+                self.stop_webrtc()
                 self.set_vcap(None)
                 self.restart()
 
@@ -488,6 +537,114 @@ class CameraSourceWorker(BackendWorker):
             self.vcap.release()
         self.vcap = vcap
 
+    def _parse_url_port_and_proto(self, url: str) -> Tuple[Union[int, None], Union[str, None]]:
+        if not url:
+            return None, None
+        try:
+            lower_url = url.lower()
+            if lower_url.startswith("udp://"):
+                proto = "udp"
+            elif lower_url.startswith("srt://"):
+                proto = "udp"  # SRT uses UDP under the hood
+            elif lower_url.startswith("rtmp://"):
+                proto = "tcp"
+            elif lower_url.startswith("rtsp://"):
+                proto = "tcp"
+            else:
+                proto = "tcp"
+                
+            parts = url.split("://", 1)
+            if len(parts) < 2:
+                return None, None
+            
+            host_port_path = parts[1]
+            host_port = host_port_path.split("/", 1)[0].split("?", 1)[0]
+            if ":" in host_port:
+                port_str = host_port.split(":")[-1]
+                port_digits = "".join(c for c in port_str if c.isdigit())
+                if port_digits:
+                    return int(port_digits), proto
+        except Exception as e:
+            print(f"\033[93mError parsing port/proto from url {url}: {e}\033[0m")
+        return None, None
+
+    def _ensure_port_is_free(self, port: int, proto: str):
+        sys_platform = platform.system().lower()
+        if sys_platform not in ['linux', 'darwin']:
+            return
+
+        print(f"\033[93m[Port Guard] Checking if {proto} port {port} is available...\033[0m")
+        
+        pids = []
+        
+        # 1. Try lsof
+        try:
+            out = subprocess.check_output(["lsof", "-t", f"-i{proto}:{port}"], stderr=subprocess.DEVNULL)
+            pids = [p.strip() for p in out.decode().splitlines() if p.strip()]
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+
+        # 2. Try fuser if no PIDs found with lsof
+        if not pids:
+            try:
+                out = subprocess.check_output(["fuser", f"{port}/{proto}"], stderr=subprocess.DEVNULL)
+                for word in out.decode().replace("/", " ").replace(":", " ").split():
+                    if word.isdigit():
+                        pids.append(word)
+            except (subprocess.SubprocessError, FileNotFoundError):
+                pass
+
+        if pids:
+            pids = list(set(pids)) # deduplicate
+            # Filter out our own PID
+            my_pid = str(os.getpid())
+            pids = [p for p in pids if p != my_pid]
+
+            if pids:
+                print(f"\033[91m[Port Guard] Port {port}/{proto} is in use by PID(s): {', '.join(pids)}. Terminating them...\033[0m")
+                for pid in pids:
+                    try:
+                        subprocess.run(["kill", "-15", pid], stderr=subprocess.DEVNULL)
+                    except (subprocess.SubprocessError, FileNotFoundError):
+                        pass
+                
+                # Wait up to 1 second for processes to exit
+                for _ in range(10):
+                    time.sleep(0.1)
+                    still_alive = []
+                    for pid in pids:
+                        if sys_platform == 'linux':
+                            if os.path.exists(f"/proc/{pid}"):
+                                still_alive.append(pid)
+                        else:
+                            try:
+                                os.kill(int(pid), 0)
+                                still_alive.append(pid)
+                            except OSError:
+                                pass
+                    if not still_alive:
+                        break
+                    pids = still_alive
+                
+                # If still alive, force kill
+                if pids:
+                    print(f"\033[91m[Port Guard] Force killing stubborn PID(s): {', '.join(pids)}...\033[0m")
+                    for pid in pids:
+                        try:
+                            subprocess.run(["kill", "-9", pid], stderr=subprocess.DEVNULL)
+                        except (subprocess.SubprocessError, FileNotFoundError):
+                            pass
+                    time.sleep(0.5)
+            else:
+                print(f"\033[92m[Port Guard] Port {port}/{proto} only bound by our own process.\033[0m")
+        else:
+            # Blanket kill with fuser just in case
+            try:
+                subprocess.run(["fuser", "-k", "-9", f"{port}/{proto}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except (subprocess.SubprocessError, FileNotFoundError):
+                pass
+            print(f"\033[92m[Port Guard] Port {port}/{proto} is free.\033[0m")
+
     def _ffmpeg_reader(self, url):
         self.ffmpeg_starting = True
         stream_connected = False
@@ -503,6 +660,11 @@ class CameraSourceWorker(BackendWorker):
 
             is_file = os.path.exists(url)
             is_listener = 'listen=1' in url or 'mode=listener' in url or url.startswith('udp://')
+
+            if is_listener:
+                port, proto = self._parse_url_port_and_proto(url)
+                if port is not None and proto is not None:
+                    self._ensure_port_is_free(port, proto)
 
             # We try to probe the stream first to get resolution, unless it's a listener
             w, h = 1280, 720 # Default
@@ -521,7 +683,7 @@ class CameraSourceWorker(BackendWorker):
                 except:
                     print("\033[93mFailed to probe, using default 1280x720\033[0m")
             else:
-                print(f"\033[93mListener mode detected, waiting for connection on {url}...\033[0m")
+                print(f"\033[93mListener mode detected, waiting for connection on {url}\033[0m")
 
             cmd = ['ffmpeg']
             if is_listener:
@@ -591,8 +753,85 @@ class CameraSourceWorker(BackendWorker):
         self._last_stream_wait_sent = None
         self._ffmpeg_consecutive_listen_failures = 0
 
+    # ── WebRTC server management ──────────────────────────────────────
+
+    def _start_webrtc_server(self):
+        """Spawn the WebRTC server subprocess and set up shared memory."""
+        from .webrtc_server import SHM_SIZE, run_webrtc_server
+
+        cs = self.get_control_sheet()
+        self.stop_webrtc()  # clean up any previous instance
+
+        # Create shared memory
+        self._webrtc_shm = shared_memory.SharedMemory(create=True, size=SHM_SIZE)
+        self._webrtc_stop_event = multiprocessing.Event()
+        self._webrtc_last_seq = 0
+
+        port = self._webrtc_port
+        self._webrtc_proc = multiprocessing.Process(
+            target=run_webrtc_server,
+            args=(self._webrtc_shm.name, port, self._webrtc_stop_event),
+            daemon=True,
+        )
+        # Python's multiprocessing does not allow daemon processes to have children.
+        # We temporarily disable the daemon flag of the current process to start the child, and then restore it.
+        current_proc = multiprocessing.current_process()
+        was_daemon = current_proc.daemon
+        current_proc.daemon = False
+        try:
+            self._webrtc_proc.start()
+        finally:
+            current_proc.daemon = was_daemon
+
+
+        url = f'http://0.0.0.0:{port}'
+        cs.webrtc_url.set_text(url)
+        cs.webrtc_waiting.set_flag(True)
+        print(f"\033[92m[WebRTC] Server started — open {url} in your browser\033[0m")
+
+    def stop_webrtc(self):
+        """Gracefully stop the WebRTC server and release shared memory."""
+        cs = self.get_control_sheet()
+        if self._webrtc_stop_event is not None:
+            self._webrtc_stop_event.set()
+        if self._webrtc_proc is not None:
+            self._webrtc_proc.join(timeout=3.0)
+            if self._webrtc_proc.is_alive():
+                self._webrtc_proc.terminate()
+                self._webrtc_proc.join(timeout=1.0)
+            self._webrtc_proc = None
+        self._webrtc_stop_event = None
+        if self._webrtc_shm is not None:
+            try:
+                self._webrtc_shm.close()
+                self._webrtc_shm.unlink()
+            except Exception:
+                pass
+            self._webrtc_shm = None
+        self._webrtc_last_seq = 0
+        if cs.webrtc_waiting.is_enabled():
+            cs.webrtc_waiting.set_flag(False)
+        if cs.webrtc_url.is_enabled():
+            cs.webrtc_url.set_text('')
+        print("\033[93m[WebRTC] Server stopped\033[0m")
+
+    def _read_webrtc_frame(self):
+        """Read a frame from WebRTC shared memory if a new one is available."""
+        from .webrtc_server import read_frame_from_shm
+        if self._webrtc_shm is None:
+            return None
+        result = read_frame_from_shm(self._webrtc_shm)
+        if result is None:
+            return None
+        w, h, seq, frame = result
+        if seq == self._webrtc_last_seq:
+            return None  # no new frame
+        self._webrtc_last_seq = seq
+        return frame
+
     def on_stop(self):
         self.stop_ffmpeg()
+        self.stop_webrtc()
         super().on_stop()
 
     def on_tick(self):
@@ -603,11 +842,10 @@ class CameraSourceWorker(BackendWorker):
                 self.set_vcap(None)
 
             if self.vcap is not None:
-                self.start_profile_timing()
                 ret, img = self.vcap.read()
                 if ret:
                     self._process_frame(img)
-        else:
+        elif state.source_type == _SourceType.NETWORK_STREAM:
             self._update_stream_waiting_ui()
             if self.ffmpeg_proc is None and not self.ffmpeg_starting:
                 if state.stream_url:
@@ -623,14 +861,24 @@ class CameraSourceWorker(BackendWorker):
                         self.ffmpeg_thread.start()
             
             if self.last_frame is not None:
-                self.start_profile_timing()
                 img = self.last_frame
                 self.last_frame = None
                 self._process_frame(img)
+        elif state.source_type == _SourceType.WEBRTC_STREAM:
+            # Read frames from WebRTC shared memory
+            frame = self._read_webrtc_frame()
+            if frame is not None:
+                # First frame received — update waiting indicator
+                if cs.webrtc_waiting.is_enabled():
+                    cs.webrtc_waiting.set_flag(False)
+                self._process_frame(frame)
+            else:
+                time.sleep(0.001)
 
     def _process_frame(self, img):
         state, cs = self.get_state(), self.get_control_sheet()
         self.stop_profile_timing()
+        self.start_profile_timing()
         timestamp = datetime.now().timestamp()
         fps = state.fps
         if fps is None:
@@ -666,6 +914,8 @@ class CameraSourceWorker(BackendWorker):
             
             if state.source_type == _SourceType.CAMERA_DEVICE:
                 frame_name = f'Camera_{state.device_idx}_{bcd_uid:06}'
+            elif state.source_type == _SourceType.WEBRTC_STREAM:
+                frame_name = f'WebRTC_{bcd_uid:06}'
             else:
                 frame_name = f'Stream_{bcd_uid:06}'
             
@@ -710,6 +960,7 @@ class WorkerState(BackendWorkerState):
         self.rotation : _RotationType = None
         self.flip_horizontal : bool = None
         self.settings_by_idx = {}
+        self.webrtc_port : int = None
 
 class Sheet:
     class Host(lib_csw.Sheet.Host):
@@ -720,6 +971,8 @@ class Sheet:
             self.stream_protocol = lib_csw.DynamicSingleSwitch.Client()
             self.stream_client_hint = lib_csw.Text.Client()
             self.stream_waiting = lib_csw.Flag.Client()
+            self.webrtc_url = lib_csw.Text.Client()
+            self.webrtc_waiting = lib_csw.Flag.Client()
             self.device_idx = lib_csw.DynamicSingleSwitch.Client()
             self.driver = lib_csw.DynamicSingleSwitch.Client()
             self.resolution = lib_csw.DynamicSingleSwitch.Client()
@@ -738,6 +991,8 @@ class Sheet:
             self.stream_protocol = lib_csw.DynamicSingleSwitch.Host()
             self.stream_client_hint = lib_csw.Text.Host()
             self.stream_waiting = lib_csw.Flag.Host()
+            self.webrtc_url = lib_csw.Text.Host()
+            self.webrtc_waiting = lib_csw.Flag.Host()
             self.device_idx = lib_csw.DynamicSingleSwitch.Host()
             self.driver = lib_csw.DynamicSingleSwitch.Host()
             self.resolution = lib_csw.DynamicSingleSwitch.Host()
