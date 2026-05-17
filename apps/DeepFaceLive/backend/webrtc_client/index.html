@@ -38,6 +38,29 @@
         </svg>
         <span>Select a camera and press Start</span>
       </div>
+      <!-- Metrics Overlay -->
+      <div class="metrics-overlay" id="metrics-overlay" style="display: none;">
+        <div class="metric-card">
+          <div class="metric-val" id="metric-res">720p</div>
+          <div class="metric-lbl">Resolution</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val" id="metric-fps">0</div>
+          <div class="metric-lbl">FPS</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val" id="metric-bitrate">0 Kbps</div>
+          <div class="metric-lbl">Bitrate</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val" id="metric-rtt">0ms</div>
+          <div class="metric-lbl">RTT</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val" id="metric-loss">0%</div>
+          <div class="metric-lbl">Loss</div>
+        </div>
+      </div>
     </div>
 
     <!-- Status Bar -->
@@ -56,11 +79,11 @@
       </div>
 
       <div class="control-row">
-        <label for="resolution-select">Quality</label>
-        <select id="resolution-select">
-          <option value="640x480">480p (640 × 480)</option>
-          <option value="1280x720" selected>720p (1280 × 720)</option>
-          <option value="1920x1080">1080p (1920 × 1080)</option>
+        <label for="preset-select">Preset</label>
+        <select id="preset-select">
+          <option value="low-latency">Low Latency (720p30, 1.5 Mbps)</option>
+          <option value="balanced" selected>Balanced (720p30, 3 Mbps)</option>
+          <option value="high-quality">High Quality (1080p30, 6 Mbps)</option>
         </select>
       </div>
 

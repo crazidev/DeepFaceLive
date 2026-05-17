@@ -864,10 +864,27 @@ class CameraSourceWorker(BackendWorker):
         result = read_frame_from_shm(self._webrtc_shm)
         if result is None:
             return None
-        w, h, seq, frame = result
+        w, h, seq, fmt_code, timestamp, frame = result
         if seq == self._webrtc_last_seq:
             return None  # no new frame
+            
+        # Logging sequence jumps (frame skips) to help diagnose processing latency spikes
+        if self._webrtc_last_seq > 0 and seq > self._webrtc_last_seq + 1:
+            skipped = seq - self._webrtc_last_seq - 1
+            
         self._webrtc_last_seq = seq
+        
+        # Enforce configurable maximum resolution limits (prevent memory overflows)
+        max_w = int(os.environ.get('DFL_WEBRTC_MAX_WIDTH', 1920))
+        max_h = int(os.environ.get('DFL_WEBRTC_MAX_HEIGHT', 1080))
+        if w > max_w or h > max_h:
+            return None
+
+        # Decode YUV420P natively and extremely fast using OpenCV on DeepFaceLive's process
+        if fmt_code == 1:
+            import cv2
+            frame = cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_I420)
+            
         return frame
 
     def on_stop(self):
