@@ -71,6 +71,7 @@ def _get_ssl_context():
         except Exception:
             local_ip = "127.0.0.1"
 
+        import ipaddress
         cert = x509.CertificateBuilder().subject_name(
             subject
         ).issuer_name(
@@ -86,8 +87,8 @@ def _get_ssl_context():
         ).add_extension(
             x509.SubjectAlternativeName([
                 x509.DNSName(u'localhost'),
-                x509.IPAddress(socket.inet_aton('127.0.0.1')),
-                x509.IPAddress(socket.inet_aton(local_ip)),
+                x509.IPAddress(ipaddress.IPv4Address('127.0.0.1')),
+                x509.IPAddress(ipaddress.IPv4Address(local_ip)),
             ]),
             critical=False,
         ).sign(key, hashes.SHA256())
