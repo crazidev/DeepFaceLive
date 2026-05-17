@@ -754,24 +754,24 @@ class CameraSourceWorker(BackendWorker):
         self._ffmpeg_consecutive_listen_failures = 0
 
 
-def _kill_port_process(port):
-    import subprocess
-    import platform
-    import time
-    print(f"\033[93m[WebRTC] Checking if port {port} is already in use...\033[0m")
-    try:
-        res = subprocess.run(['lsof', '-t', '-i', f'tcp:{port}'], capture_output=True, text=True)
-        pids = [p.strip() for p in res.stdout.strip().split('\n') if p.strip().isdigit()]
-        if pids:
-            print(f"\033[91m[WebRTC] Port {port} is held by PIDs {pids}. Killing them...\033[0m")
-            if platform.system() == 'Linux':
-                subprocess.run(['fuser', '-k', f'{port}/tcp'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            else:
-                for pid in pids:
-                    subprocess.run(['kill', '-9', pid])
-            time.sleep(1.0) # give socket some time to release
-    except Exception as e:
-        print(f"[WebRTC] Warning: Error checking/killing port process: {e}")
+    def _kill_port_process(self, port):
+        import subprocess
+        import platform
+        import time
+        print(f"\033[93m[WebRTC] Checking if port {port} is already in use...\033[0m")
+        try:
+            res = subprocess.run(['lsof', '-t', '-i', f'tcp:{port}'], capture_output=True, text=True)
+            pids = [p.strip() for p in res.stdout.strip().split('\n') if p.strip().isdigit()]
+            if pids:
+                print(f"\033[91m[WebRTC] Port {port} is held by PIDs {pids}. Killing them...\033[0m")
+                if platform.system() == 'Linux':
+                    subprocess.run(['fuser', '-k', f'{port}/tcp'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    for pid in pids:
+                        subprocess.run(['kill', '-9', pid])
+                time.sleep(1.0) # give socket some time to release
+        except Exception as e:
+            print(f"[WebRTC] Warning: Error checking/killing port process: {e}")
 
 
     # ── WebRTC server management ──────────────────────────────────────
@@ -784,7 +784,7 @@ def _kill_port_process(port):
         self.stop_webrtc()  # clean up any previous instance
 
         # Robust port release/cleanup before binding
-        _kill_port_process(self._webrtc_port)
+        self._kill_port_process(self._webrtc_port)
 
         # Create shared memory
         self._webrtc_shm = shared_memory.SharedMemory(create=True, size=SHM_SIZE)
