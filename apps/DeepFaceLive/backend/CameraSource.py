@@ -784,10 +784,27 @@ class CameraSourceWorker(BackendWorker):
             current_proc.daemon = was_daemon
 
 
-        url = f'http://0.0.0.0:{port}'
-        cs.webrtc_url.set_text(url)
+        # Determine the best friendly URL to display to the user
+        public_url = os.environ.get('DFL_WEBRTC_PUBLIC_URL')
+        if not public_url:
+            public_host = os.environ.get('DFL_TURN_PUBLIC_HOST')
+            if public_host:
+                public_url = f'https://{public_host}' if port in (443, 80) else f'http://{public_host}:{port}'
+        
+        if not public_url:
+            import socket
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+            except Exception:
+                local_ip = "localhost"
+            public_url = f'http://{local_ip}:{port}'
+
+        cs.webrtc_url.set_text(public_url)
         cs.webrtc_waiting.set_flag(True)
-        print(f"\033[92m[WebRTC] Server started — open {url} in your browser\033[0m")
+        print(f"\033[92m[WebRTC] Server started — open {public_url} in your browser\033[0m")
 
     def stop_webrtc(self):
         """Gracefully stop the WebRTC server and release shared memory."""

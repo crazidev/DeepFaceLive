@@ -17,8 +17,9 @@ const btnStart = document.getElementById('btn-start');
 const btnStop = document.getElementById('btn-stop');
 
 // ── State ────────────────────────────────────────────────────────────
-let pc = null;   // RTCPeerConnection
-let stream = null;   // MediaStream from camera
+let pc = null;         // RTCPeerConnection
+let localStream = null; // Persistent MediaStream from camera for preview + streaming
+let iceConfig = null;   // Fetched dynamic ICE configurations (STUN/TURN)
 let running = false;
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -30,6 +31,85 @@ function setStatus(state, text) {
 function parseResolution() {
   const [w, h] = resolutionSel.value.split('x').map(Number);
   return { width: w, height: h };
+}
+
+/**
+ * Modifies the SDP string before setting local description to force the
+ * browser to use a high target bitrate (Application Specific bandwidth cap).
+ */
+function setSDPBitrate(sdp, bitrateKbps) {
+  const lines = sdp.split('\r\n');
+  let lineIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].indexOf('m=video') === 0) {
+      lineIndex = i;
+      break;
+    }
+  }
+  if (lineIndex === -1) {
+    return sdp;
+  }
+  
+  let hasAS = false;
+  for (let i = lineIndex + 1; i < lines.length; i++) {
+    if (lines[i].indexOf('m=') === 0) {
+      break; // reached next media section
+    }
+    if (lines[i].indexOf('b=AS:') === 0) {
+      lines[i] = `b=AS:${bitrateKbps}`;
+      hasAS = true;
+      break;
+    }
+  }
+  
+  if (!hasAS) {
+    lines.splice(lineIndex + 1, 0, `b=AS:${bitrateKbps}`);
+  }
+  
+  return lines.join('\r\n');
+}
+
+// ── Fetch ICE Config ─────────────────────────────────────────────────
+async function fetchIceConfig() {
+  try {
+    const resp = await fetch('/ice-config');
+    if (resp.ok) {
+      const data = await resp.json();
+      iceConfig = data.iceServers;
+      console.log('Successfully loaded ICE relay config:', iceConfig);
+    }
+  } catch (err) {
+    console.error('Failed to load dynamic ICE configuration:', err);
+  }
+}
+
+// ── Camera Preview ───────────────────────────────────────────────────
+async function startPreview() {
+  cleanupStream();
+  const deviceId = cameraSelect.value;
+  if (!deviceId) return;
+
+  const res = parseResolution();
+  try {
+    // Ideal settings for high definition (HD) camera streaming
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId: { exact: deviceId },
+        width: { ideal: res.width },
+        height: { ideal: res.height },
+        frameRate: { ideal: 60 },
+      },
+      audio: false,
+    });
+    videoEl.srcObject = localStream;
+    placeholder.style.display = 'none';
+    setStatus('', 'Preview Active');
+  } catch (err) {
+    console.error('Failed to get camera preview:', err);
+    setStatus('error', 'Camera access failed');
+    placeholder.style.display = '';
+    videoEl.srcObject = null;
+  }
 }
 
 // ── Enumerate cameras ────────────────────────────────────────────────
@@ -53,6 +133,9 @@ async function enumerateDevices() {
       opt.textContent = d.label || `Camera ${i + 1}`;
       cameraSelect.appendChild(opt);
     });
+
+    // Start previewing immediately on dropdown load
+    await startPreview();
   } catch (err) {
     console.error('Device enumeration failed:', err);
     cameraSelect.innerHTML = '<option value="">Camera access denied</option>';
@@ -63,44 +146,30 @@ async function enumerateDevices() {
 // ── Start streaming ──────────────────────────────────────────────────
 async function startStreaming() {
   if (running) return;
-  const deviceId = cameraSelect.value;
-  if (!deviceId) { setStatus('error', 'No camera selected'); return; }
 
-  btnStart.disabled = true;
-  setStatus('connecting', 'Requesting camera…');
+  // Ensure camera preview stream is warm and active
+  if (!localStream || !localStream.getVideoTracks().some(t => t.readyState === 'live')) {
+    await startPreview();
+  }
 
-  const res = parseResolution();
-
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        deviceId: { exact: deviceId },
-        width: { ideal: res.width },
-        height: { ideal: res.height },
-        frameRate: { ideal: 60 },
-      },
-      audio: false,
-    });
-  } catch (err) {
-    console.error('getUserMedia failed:', err);
-    setStatus('error', 'Camera access failed');
-    btnStart.disabled = false;
+  if (!localStream) {
+    setStatus('error', 'No active camera feed to stream');
     return;
   }
 
-  // Show preview
-  videoEl.srcObject = stream;
-  placeholder.style.display = 'none';
-
-  setStatus('connecting', 'Connecting to server…');
+  btnStart.disabled = true;
+  setStatus('connecting', 'Connecting to DeepFaceLive…');
 
   try {
+    // Connect WebRTC using dynamic dynamic configurations (supporting remote tunnels like RunPod TLS TURN)
     pc = new RTCPeerConnection({
-      iceServers: [],   // LAN-only; no STUN needed
+      iceServers: iceConfig || [
+        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }
+      ],
     });
 
-    // Add camera tracks
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    // Feed tracks from existing warm localStream
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
@@ -108,7 +177,6 @@ async function startStreaming() {
         setStatus('connected', 'Streaming to DeepFaceLive');
       } else if (st === 'disconnected') {
         setStatus('error', 'Disconnected — retrying…');
-        // Auto-reconnect after short delay
         setTimeout(() => { if (running) reconnect(); }, 2000);
       } else if (st === 'failed') {
         setStatus('error', 'Connection failed');
@@ -117,10 +185,13 @@ async function startStreaming() {
     };
 
     // Create and send offer
-    const offer = await pc.createOffer();
+    let offer = await pc.createOffer();
+
+    // Optimize streaming quality: set SDP video bandwidth to 8000 Kbps (8 Mbps) for full HD
+    offer.sdp = setSDPBitrate(offer.sdp, 8000);
     await pc.setLocalDescription(offer);
 
-    // Wait for ICE gathering to complete (or timeout after 3 s)
+    // Wait for ICE gathering to complete (max 3 s)
     await new Promise((resolve) => {
       if (pc.iceGatheringState === 'complete') { resolve(); return; }
       const timeout = setTimeout(resolve, 3000);
@@ -153,7 +224,6 @@ async function startStreaming() {
     console.error('WebRTC setup failed:', err);
     setStatus('error', 'Failed to connect');
     cleanupPC();
-    cleanupStream();
     btnStart.disabled = false;
   }
 }
@@ -162,12 +232,9 @@ async function startStreaming() {
 function stopStreaming() {
   running = false;
   cleanupPC();
-  cleanupStream();
-  placeholder.style.display = '';
-  videoEl.srcObject = null;
   btnStart.disabled = false;
   btnStop.disabled = true;
-  setStatus('', 'Stopped');
+  setStatus('', 'Stopped (Preview Active)');
 }
 
 function cleanupPC() {
@@ -179,21 +246,24 @@ function cleanupPC() {
 }
 
 function cleanupStream() {
-  if (stream) {
-    stream.getTracks().forEach(t => t.stop());
-    stream = null;
+  if (localStream) {
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
   }
 }
 
-// ── Reconnect (same camera) ─────────────────────────────────────────
+// ── Reconnect (same stream) ──────────────────────────────────────────
 async function reconnect() {
   cleanupPC();
-  // Re-use existing stream if tracks are still live
-  if (stream && stream.getVideoTracks().some(t => t.readyState === 'live')) {
+  if (localStream && localStream.getVideoTracks().some(t => t.readyState === 'live')) {
     setStatus('connecting', 'Reconnecting…');
     try {
-      pc = new RTCPeerConnection({ iceServers: [] });
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      pc = new RTCPeerConnection({
+        iceServers: iceConfig || [
+          { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }
+        ],
+      });
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
       pc.oniceconnectionstatechange = () => {
         const st = pc.iceConnectionState;
@@ -208,8 +278,10 @@ async function reconnect() {
         }
       };
 
-      const offer = await pc.createOffer();
+      let offer = await pc.createOffer();
+      offer.sdp = setSDPBitrate(offer.sdp, 8000);
       await pc.setLocalDescription(offer);
+
       await new Promise((resolve) => {
         if (pc.iceGatheringState === 'complete') { resolve(); return; }
         const timeout = setTimeout(resolve, 3000);
@@ -243,6 +315,11 @@ async function reconnect() {
 // ── Bind events ──────────────────────────────────────────────────────
 btnStart.addEventListener('click', startStreaming);
 btnStop.addEventListener('click', stopStreaming);
+cameraSelect.addEventListener('change', startPreview);
+resolutionSel.addEventListener('change', startPreview);
 
 // Init
-enumerateDevices();
+(async () => {
+  await fetchIceConfig();
+  await enumerateDevices();
+})();

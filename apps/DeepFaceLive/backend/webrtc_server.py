@@ -114,6 +114,49 @@ class VideoReceiver:
 # aiohttp application
 # ---------------------------------------------------------------------------
 
+def _get_rtc_configuration():
+    from aiortc import RTCIceServer, RTCConfiguration
+    ice_servers = [
+        RTCIceServer(urls='stun:stun.l.google.com:19302'),
+        RTCIceServer(urls='stun:stun1.l.google.com:19302'),
+        RTCIceServer(urls='stun:stun2.l.google.com:19302'),
+    ]
+    
+    turn_server = os.environ.get('DFL_TURN_SERVER') or os.environ.get('DFL_TURN_PUBLIC_HOST')
+    if turn_server:
+        if not (turn_server.startswith('turn:') or turn_server.startswith('turns:')):
+            turn_server = f"turns:{turn_server}:443?transport=tcp"
+            
+        turn_user = os.environ.get('DFL_TURN_USER', 'dfl')
+        turn_pass = os.environ.get('DFL_TURN_PASSWORD', 'dflturn')
+        
+        logger.info(f"Using TURN relay server config: {turn_server} with user: {turn_user}")
+        ice_servers.append(RTCIceServer(urls=turn_server, username=turn_user, credential=turn_pass))
+        
+    return RTCConfiguration(iceServers=ice_servers)
+
+
+def _get_ice_servers_json():
+    ice_servers = [
+        {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"]}
+    ]
+    
+    turn_server = os.environ.get('DFL_TURN_SERVER') or os.environ.get('DFL_TURN_PUBLIC_HOST')
+    if turn_server:
+        if not (turn_server.startswith('turn:') or turn_server.startswith('turns:')):
+            turn_server = f"turns:{turn_server}:443?transport=tcp"
+            
+        turn_user = os.environ.get('DFL_TURN_USER', 'dfl')
+        turn_pass = os.environ.get('DFL_TURN_PASSWORD', 'dflturn')
+        
+        ice_servers.append({
+            "urls": [turn_server],
+            "username": turn_user,
+            "credential": turn_pass
+        })
+    return ice_servers
+
+
 async def _create_app(shm: shared_memory.SharedMemory, port: int):
     from aiohttp import web
     from aiortc import RTCPeerConnection, RTCSessionDescription
@@ -130,7 +173,8 @@ async def _create_app(shm: shared_memory.SharedMemory, port: int):
         params = await request.json()
         offer_sdp = RTCSessionDescription(sdp=params['sdp'], type=params['type'])
 
-        pc = RTCPeerConnection()
+        config = _get_rtc_configuration()
+        pc = RTCPeerConnection(configuration=config)
         pcs.add(pc)
 
         receiver = VideoReceiver(shm)
@@ -164,6 +208,11 @@ async def _create_app(shm: shared_memory.SharedMemory, port: int):
             'type': pc.localDescription.type,
         })
 
+    async def ice_config(request):
+        return web.json_response({
+            'iceServers': _get_ice_servers_json()
+        })
+
     async def health(request):
         return web.json_response({'status': 'ok', 'peers': len(pcs)})
 
@@ -179,6 +228,7 @@ async def _create_app(shm: shared_memory.SharedMemory, port: int):
 
     app.router.add_get('/', index)
     app.router.add_post('/offer', offer)
+    app.router.add_get('/ice-config', ice_config)
     app.router.add_get('/health', health)
     # Serve static assets (JS, CSS) from webrtc_client/
     app.router.add_static('/static/', path=str(static_dir), name='static')
